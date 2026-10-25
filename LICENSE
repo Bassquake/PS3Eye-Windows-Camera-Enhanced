@@ -1,0 +1,21 @@
+PS3 Eye Camera for Windows 11
+Copyright (C) 2026 Ahmed Ashraf
+
+This program is free software; you can redistribute it and/or modify it under the terms of
+the GNU General Public License as published by the Free Software Foundation; either
+version 2 of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+See the GNU General Public License for more details:
+https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
+
+Third-party parts:
+- src/core/ps3eye_camera.cpp: OV534/OV772x register tables, frame-rate table and payload
+  parser derived from the Linux kernel gspca ov534 driver (GPL-2.0-or-later) as packaged in
+  https://github.com/inspirit/PS3EYEDriver.
+- src/source/*: Media Foundation virtual camera scaffolding adapted from
+  https://github.com/smourier/VCamSample, MIT License, Copyright (c) 2024-2026 Simon Mourier
+  (full text in src/source/LICENSE-VCamSample.txt).
+- libusb (https://libusb.info), LGPL-2.1, statically linked; complete source of this program
+  is provided so it can be relinked against a modified libusb.

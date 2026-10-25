@@ -1,0 +1,69 @@
+cmake_minimum_required(VERSION 3.21)
+
+# Static CRT on Windows so the DLL loads inside the Windows camera service with no extra runtimes.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+project(PS3EyeVCam VERSION 1.0.0 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+option(PS3EYE_BUILD_TESTS "Build the portable unit tests" ON)
+
+# ---- libusb -------------------------------------------------------------------
+find_path(LIBUSB_INCLUDE_DIR libusb.h PATH_SUFFIXES libusb-1.0 REQUIRED)
+find_library(LIBUSB_LIBRARY NAMES libusb-1.0 usb-1.0 REQUIRED)
+
+# ---- portable camera core (libusb driver + pixel conversion) -------------------
+add_library(ps3eye_core STATIC
+    src/core/ps3eye_camera.cpp
+    src/core/convert.cpp)
+target_include_directories(ps3eye_core PUBLIC src/core PRIVATE ${LIBUSB_INCLUDE_DIR})
+target_link_libraries(ps3eye_core PUBLIC ${LIBUSB_LIBRARY})
+if(UNIX)
+    find_package(Threads REQUIRED)
+    target_link_libraries(ps3eye_core PUBLIC Threads::Threads)
+endif()
+
+if(MSVC)
+    add_compile_options(/W3 /permissive- /utf-8 /EHsc /MP /Zc:__cplusplus)
+    add_compile_definitions(UNICODE _UNICODE NOMINMAX _CRT_SECURE_NO_WARNINGS)
+endif()
+
+if(PS3EYE_BUILD_TESTS)
+    enable_testing()
+    add_executable(test_core tests/test_core.cpp)
+    target_link_libraries(test_core PRIVATE ps3eye_core)
+    add_test(NAME core COMMAND test_core)
+endif()
+
+if(WIN32)
+    find_package(wil CONFIG REQUIRED)
+    find_package(cppwinrt CONFIG REQUIRED)
+
+    set(MF_LIBS mfplat mf mfuuid mfsensorgroup ole32 oleaut32 propsys shlwapi advapi32 shell32 windowsapp)
+
+    # ---- the virtual camera media source (loaded by the Windows Camera Frame Server)
+    add_library(PS3EyeVCam SHARED
+        src/source/Activator.cpp
+        src/source/Config.cpp
+        src/source/EnumNames.cpp
+        src/source/MediaSource.cpp
+        src/source/MediaStream.cpp
+        src/source/MFTools.cpp
+        src/source/Tools.cpp
+        src/source/WinTrace.cpp
+        src/source/dllmain.cpp
+        src/source/PS3EyeVCam.def)
+    target_compile_definitions(PS3EyeVCam PRIVATE _WINDOWS _USRDLL)
+    target_link_libraries(PS3EyeVCam PRIVATE ps3eye_core WIL::WIL Microsoft::CppWinRT ${MF_LIBS})
+
+    # ---- setup / test / settings tool
+    add_executable(PS3EyeSetup
+        src/setup/setup.cpp
+        src/setup/usbdriver.cpp
+        src/source/Config.cpp
+        src/setup/setup.manifest)
+    target_link_libraries(PS3EyeSetup PRIVATE ps3eye_core ${MF_LIBS} setupapi newdev cfgmgr32)
+    target_link_options(PS3EyeSetup PRIVATE /MANIFESTUAC:NO)   # UAC level comes from setup.manifest
+endif()

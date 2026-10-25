@@ -1,0 +1,7 @@
+build/
+dist/
+vcpkg/
+vcpkg_installed/
+out/
+.vs/
+*.zip

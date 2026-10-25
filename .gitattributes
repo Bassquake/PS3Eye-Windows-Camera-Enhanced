@@ -1,0 +1,3 @@
+*.bat text eol=crlf
+*.cpp text
+*.h text
