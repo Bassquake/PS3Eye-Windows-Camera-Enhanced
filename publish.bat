@@ -5,9 +5,9 @@ rem Run build.bat first. Double-click to run.
 setlocal
 cd /d "%~dp0"
 set "VERSION=1.0.0"
-set "REPO=ps3eye-windows-camera"
-set "AUTHOR=Ahmed Ashraf"
-set "DESCRIPTION=Use the PlayStation 3 Eye as a normal webcam on Windows 11 (Zoom, Discord, Teams, OBS). One-click installer, no Zadig."
+set "REPO=ps3eye-windows-camera-for-windows-10"
+set "AUTHOR=Bassquake"
+set "DESCRIPTION=Use the PlayStation 3 Eye as a normal webcam on Windows 10 and 11 (Zoom, Discord, Teams, OBS). One-click installer, no Zadig."
 title Publish PS3 Eye Camera to GitHub
 
 set "SETUP=dist\PS3EyeCamera-Setup-%VERSION%.exe"
@@ -40,7 +40,7 @@ if not exist .git git init -q -b main
 git config user.name "%AUTHOR%"
 git config user.email "%GHID%+%LOGIN%@users.noreply.github.com"
 git add -A
-git diff --cached --quiet || git commit -q -m "PS3 Eye Camera for Windows 11 v%VERSION%" || goto failed
+git diff --cached --quiet || git commit -q -m "PS3 Eye Camera for Windows 10 and 11 v%VERSION%" || goto failed
 
 rem ---- repo + push ----
 gh repo view "%LOGIN%/%REPO%" >nul 2>nul
@@ -49,7 +49,7 @@ if errorlevel 1 (
 )
 git remote get-url origin >nul 2>nul || git remote add origin "https://github.com/%LOGIN%/%REPO%.git"
 git push -u origin main || goto failed
-gh repo edit "%LOGIN%/%REPO%" --add-topic ps3-eye --add-topic webcam --add-topic windows-11 --add-topic virtual-camera >nul 2>nul
+gh repo edit "%LOGIN%/%REPO%" --add-topic ps3-eye --add-topic webcam --add-topic windows-11 --add-topic windows-10 --add-topic virtual-camera >nul 2>nul
 
 rem ---- release with the installer you built and tested ----
 gh release view "v%VERSION%" --repo "%LOGIN%/%REPO%" >nul 2>nul

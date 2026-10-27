@@ -3,7 +3,9 @@
 ;
 ; The wizard stages the files in {app}\installer and runs "PS3EyeSetup.exe install" from there.
 ; That tool copies them into {app} (handling a DLL still loaded by the Windows camera service),
-; registers the camera and sets up the USB driver.
+; registers the camera and sets up the USB driver. It picks the camera type itself: the Windows 11
+; virtual camera (PS3EyeVCam.dll), or on Windows 10 the DirectShow filters (PS3EyeDShow64/32.dll)
+; fed by PS3EyeServer.exe.
 
 #ifndef AppVersion
   #define AppVersion "1.0.0"
@@ -17,7 +19,7 @@ AppId={{C4BF9929-859F-4A33-9EA8-18ED97AF3B79}
 AppName=PS3 Eye Camera
 AppVersion={#AppVersion}
 AppVerName=PS3 Eye Camera {#AppVersion}
-AppPublisher=Ahmed Ashraf
+AppPublisher=Bassquake
 DefaultDirName={autopf}\PS3EyeVCam
 DisableDirPage=yes
 DisableProgramGroupPage=yes
@@ -26,7 +28,7 @@ LicenseFile=..\LICENSE
 PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-MinVersion=10.0.22000
+MinVersion=10.0.10240
 OutputDir={#DistDir}
 OutputBaseFilename=PS3EyeCamera-Setup-{#AppVersion}
 UninstallDisplayName=PS3 Eye Camera
@@ -37,12 +39,15 @@ WizardStyle=modern
 CloseApplications=no
 
 [Messages]
-WelcomeLabel2=This will install the PS3 Eye Camera driver, so your PlayStation 3 Eye works as a normal webcam in Zoom, Discord, Teams, OBS and the Camera app.%n%nPlug in the PS3 Eye before clicking Next.
-WindowsVersionNotSupported=PS3 Eye Camera needs Windows 11.
+WelcomeLabel2=This will install the PS3 Eye Camera driver, so your PlayStation 3 Eye works as a normal webcam in Zoom, Discord, Teams, OBS and browsers (and the Camera app on Windows 11).%n%nPlug in the PS3 Eye before clicking Next.
+WindowsVersionNotSupported=PS3 Eye Camera needs Windows 10 or 11.
 
 [Files]
 Source: "{#DistDir}\PS3EyeSetup.exe"; DestDir: "{app}\installer"; Flags: ignoreversion
 Source: "{#DistDir}\PS3EyeVCam.dll"; DestDir: "{app}\installer"; Flags: ignoreversion
+Source: "{#DistDir}\PS3EyeServer.exe"; DestDir: "{app}\installer"; Flags: ignoreversion
+Source: "{#DistDir}\PS3EyeDShow64.dll"; DestDir: "{app}\installer"; Flags: ignoreversion
+Source: "{#DistDir}\PS3EyeDShow32.dll"; DestDir: "{app}\installer"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; DestName: "README.txt"; Flags: ignoreversion
 
 [Icons]
@@ -57,6 +62,9 @@ Filename: "{app}\installer\PS3EyeSetup.exe"; Parameters: "uninstall"; Flags: run
 [UninstallDelete]
 Type: files; Name: "{app}\PS3EyeSetup.exe"
 Type: files; Name: "{app}\PS3EyeVCam.dll"
+Type: files; Name: "{app}\PS3EyeServer.exe"
+Type: files; Name: "{app}\PS3EyeDShow64.dll"
+Type: files; Name: "{app}\PS3EyeDShow32.dll"
 Type: files; Name: "{app}\*.old*"
 Type: dirifempty; Name: "{app}"
 

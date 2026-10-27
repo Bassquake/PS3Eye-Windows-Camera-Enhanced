@@ -1,8 +1,8 @@
-# PS3 Eye Camera for Windows 11
+# PS3 Eye Camera for Windows 10 and 11
 
-Makes the PlayStation 3 Eye show up as a normal webcam called **"PS3 Eye Camera"** in Zoom, Discord, Teams, OBS, browsers and the Windows Camera app.
+Makes the PlayStation 3 Eye show up as a normal webcam called **"PS3 Eye Camera"** in Zoom, Discord, Teams, OBS, browsers and (on Windows 11) the Windows Camera app.
 
-No kernel driver, no test-signing, no paid software. It's a user-mode USB driver (libusb + WinUSB) plugged into Windows 11's built-in virtual camera system.
+No kernel driver, no test-signing, no paid software. It's a user-mode USB driver (libusb + WinUSB) plugged into Windows 11's built-in virtual camera system, or on Windows 10 into DirectShow, the way OBS Virtual Camera works.
 
 ## Install (2 minutes)
 
@@ -16,7 +16,11 @@ Afterwards, **PS3 Eye Camera Settings** in the Start menu lets you test the came
 
 No admin rights to install things? The portable zip works too: unzip, run `PS3EyeSetup.exe`, press `1`.
 
-Quick check: open **PS3 Eye Camera Settings** and choose `2` (Test). It grabs 3 seconds of video, shows the fps and opens a snapshot.
+Quick check: open **PS3 Eye Camera Settings** and choose `2` (Test). It grabs 3 seconds of video, shows the fps and saves a snapshot.
+
+Microphone check: choose `6` (Test the microphone). It records 3 seconds, shows a level bar for each of the 4 mics, and plays the recording back on your speakers (boosted, since the PS3 Eye records quietly). Same from a command prompt: `PS3EyeSetup mictest`.
+
+Both tests save their result in *Documents\PS3 Eye Camera Tests* (`ps3eye_snapshot.bmp`, `ps3eye_mic_test.wav`), replacing the previous one, and open that folder when they finish.
 
 ## Image settings
 
@@ -42,7 +46,8 @@ Changes apply live, even during a call. Defaults: auto gain/exposure and auto wh
 | "USB driver install failed" | Device Manager → *USB Camera-B4.09.24.1* → Update driver → Browse my computer → Let me pick → *Universal Serial Bus devices* → *WinUsb Device*. Then run Install again. |
 | Camera listed, but shows a grey "crossed-out camera" picture | The PS3 Eye isn't reachable: check the cable/port, then look at the log (menu `4`). |
 | Low fps / frozen picture | Plug straight into the PC, not a hub. Try another USB port. |
-| "PS3 Eye Camera" not in the list | Run Install again. Windows 11 only (build 22000+). |
+| PS3 Eye microphone missing, or the camera shows up as a COM port | Run Install again: it replaces a leftover Zadig driver on the microphone with Windows' USB audio driver, and sets the mic up again if it failed to start (error 10 in Device Manager; the PS3 Eye's mic sometimes fails to start when plugged in or after a restart). Status (menu) shows whether the mic is OK. |
+| "PS3 Eye Camera" not in the list | Run Install again. On Windows 10 the built-in Camera app (and other Store apps) can't see it: use Zoom, Teams, Discord, OBS or a browser. |
 | Test says "in use" | An app is using the camera. Close it, then test. |
 
 Log file: `C:\ProgramData\PS3EyeVCam\vcam.log`
@@ -61,21 +66,35 @@ Log file: `C:\ProgramData\PS3EyeVCam\vcam.log`
 
 ## How it works
 
+Windows 11:
+
 ```
 PS3 Eye ──USB/WinUSB──► libusb (src/core) ──Bayer frames──► demosaic → NV12/YUY2/RGB32
                                                                     │
 Zoom / Discord / Teams ◄── Windows Camera Frame Server ◄── media source DLL (src/source)
 ```
 
+Windows 10 (no virtual camera API):
+
+```
+PS3 Eye ──USB/WinUSB──► PS3EyeServer.exe ──shared memory (640×480 BGRX)──► DirectShow filter in each app
+                       (libusb + demosaic)                                  (PS3EyeDShow64/32.dll)
+                                                                                   │
+                                          Zoom / Teams / Discord / OBS / browsers ◄┘ YUY2/NV12/I420/RGB24/RGB32
+```
+
 - `src/core` — portable PS3 Eye driver: sensor setup, USB streaming, frame assembly, hot-unplug recovery, color conversion. Unit-tested (`tests/`), also builds on Linux.
 - `src/source` — Media Foundation media source the Windows Frame Server loads; one capture thread answers sample requests.
+- `src/dshow` — Windows 10: DirectShow capture filter (64- and 32-bit, so 32-bit apps see it too) and `PS3EyeServer.exe`, which owns the camera and shares frames with every app using it. The filter starts the server on demand; it quits a few seconds after the last app stops.
 - `src/setup` — installer, tester, settings and uninstaller.
 
 ## Known limits
 
 - One app or many at once: fine (Windows shares the stream). But while a call is using it, `Test` can't open the camera.
-- The PS3 Eye's 4-mic array is not touched: Windows' own USB audio driver keeps handling it.
+- The PS3 Eye's 4-mic array (4 channels, 16 kHz) is handled by Windows' own USB audio driver and shows up as *Microphone (PS3 Eye Microphone)*. If an old Zadig install put a different driver on it (often "USB Serial (CDC)", making it appear as a COM port), Install puts Windows' audio driver back. The mic's USB audio part sometimes fails to start (at random: on plug-in, after a restart or a driver reinstall). Install retries until it starts, and a small scheduled task (*PS3 Eye Camera microphone fix*, runs `PS3EyeSetup micwatch` as SYSTEM from startup) does the same automatically within seconds of a plug-in or within 15 s otherwise. Uninstall removes it.
+- Device Manager lists the camera as *PS3 Eye Camera* and its mic as *PS3 Eye Microphone* instead of *USB Camera-B4.09.24.1*. Install sets the names, and the microphone task re-applies them (on another USB port, or after a mic repair), so apps list the mic as *Microphone (PS3 Eye Microphone)*.
 - Max resolution is the sensor's 640×480.
+- Windows 10: 640×480 and 320×240 at up to 60 fps (the 120/187 fps modes are Windows 11 only). Store apps such as the Camera app and Windows Hello only list real webcams there, so they won't see it.
 
 ## License
 

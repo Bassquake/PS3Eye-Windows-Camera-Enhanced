@@ -1,4 +1,4 @@
-Use your PlayStation 3 Eye as a normal webcam on Windows 11: Zoom, Discord, Teams, OBS, browsers and the Camera app.
+Use your PlayStation 3 Eye as a normal webcam on Windows 10 and 11: Zoom, Discord, Teams, OBS, browsers (and the Camera app on Windows 11).
 
 ### Install
 1. Plug in the PS3 Eye.
@@ -13,4 +13,4 @@ If Windows says **"Windows protected your PC"**, click **More info → Run anywa
 - Auto exposure and white balance; image settings change live
 - Survives unplugging: apps show a placeholder and recover when you plug the camera back in
 
-Needs Windows 11 (x64). Uninstall from *Settings → Apps*.
+Needs Windows 10 or 11 (x64). On Windows 10, Store apps like the Camera app can't see it; desktop apps and browsers can. Uninstall from *Settings → Apps*.

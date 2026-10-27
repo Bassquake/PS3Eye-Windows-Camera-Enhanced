@@ -26,7 +26,10 @@ struct Node
 	std::wstring instanceId;
 	std::wstring service;
 	bool mi00 = false;     // video interface of the composite device
-	bool otherMi = false;  // audio interfaces: never touched
+	bool otherMi = false;  // audio interfaces: only RepairMic touches them
+	bool audio = false;    // USB audio class (the microphone array)
+	ULONG problem = 0;     // Device Manager problem code, 0 = running fine
+	bool started = false;
 };
 
 std::wstring Upper(std::wstring s)
@@ -76,6 +79,19 @@ std::vector<Node> FindNodes()
 			n.service = svc;
 		n.mi00 = first.find(L"&MI_00") != std::wstring::npos;
 		n.otherMi = !n.mi00 && first.find(L"&MI_") != std::wstring::npos;
+		wchar_t compat[4096] = {};
+		if (n.otherMi && SetupDiGetDeviceRegistryPropertyW(set, &d, SPDRP_COMPATIBLEIDS, nullptr, (BYTE*)compat, sizeof(compat) - 4 * sizeof(wchar_t), nullptr))
+		{
+			for (const wchar_t* p = compat; *p; p += wcslen(p) + 1)
+				n.audio |= Upper(p).rfind(L"USB\\CLASS_01", 0) == 0;
+		}
+		ULONG status = 0, problem = 0;
+		if (CM_Get_DevNode_Status(&status, &problem, d.DevInst, 0) == CR_SUCCESS)
+		{
+			n.started = (status & DN_STARTED) != 0;
+			if (status & DN_HAS_PROBLEM)
+				n.problem = problem;
+		}
 		nodes.push_back(n);
 	}
 	SetupDiDestroyDeviceInfoList(set);
@@ -311,6 +327,203 @@ bool Remove(std::wstring& error)
 
 	Rescan();
 	return true;
+}
+
+namespace {
+
+bool FindMic(Node& out)
+{
+	for (auto& n : FindNodes())
+	{
+		if (n.audio)
+		{
+			out = n;
+			return true;
+		}
+	}
+	return false;
+}
+
+bool IsAudioDriver(const std::wstring& svc)
+{
+	return !_wcsicmp(svc.c_str(), L"usbaudio") || !_wcsicmp(svc.c_str(), L"usbaudio2");
+}
+
+} // namespace
+
+namespace {
+
+const wchar_t* kVideoName = L"PS3 Eye Camera";
+const wchar_t* kMicName = L"PS3 Eye Microphone";
+
+std::wstring FriendlyName(DevSet& ds)
+{
+	wchar_t name[256] = L"";
+	if (!SetupDiGetDeviceRegistryPropertyW(ds.set, &ds.d, SPDRP_FRIENDLYNAME, nullptr, (BYTE*)name, sizeof(name) - sizeof(wchar_t), nullptr))
+		return L"";
+	return name;
+}
+
+// The interfaces to name: video (the libusb target) and the microphone.
+std::vector<std::pair<Node, const wchar_t*>> NamedNodes()
+{
+	std::vector<std::pair<Node, const wchar_t*>> out;
+	Node video, mic;
+	if (FindTarget(video))
+		out.push_back({ video, kVideoName });
+	if (FindMic(mic))
+		out.push_back({ mic, kMicName });
+	return out;
+}
+
+// After a (re)start: waits until the mic has started or failed, returns the final state.
+bool WaitMicStarted()
+{
+	for (int i = 0; i < 40; i++)
+	{
+		Node now;
+		if (FindMic(now) && !now.service.empty() && (now.started || now.problem))
+			return now.started && !now.problem && IsAudioDriver(now.service);
+		Sleep(250);
+	}
+	return false;
+}
+
+} // namespace
+
+bool SetDeviceNames(bool restore, std::wstring& error)
+{
+	bool ok = true;
+	for (auto& [node, name] : NamedNodes())
+	{
+		DevSet ds;
+		if (!ds.Open(node.instanceId))
+		{
+			error = LastErrorText(L"Opening the camera device failed");
+			ok = false;
+			continue;
+		}
+		const std::wstring current = FriendlyName(ds);
+		if (restore ? current != name : current == name)
+			continue; // nothing to do (on restore: leave names we didn't set alone)
+
+		BOOL set = restore
+			? SetupDiSetDeviceRegistryPropertyW(ds.set, &ds.d, SPDRP_FRIENDLYNAME, nullptr, 0)
+			: SetupDiSetDeviceRegistryPropertyW(ds.set, &ds.d, SPDRP_FRIENDLYNAME, (const BYTE*)name, (DWORD)((wcslen(name) + 1) * sizeof(wchar_t)));
+		if (!set)
+		{
+			error = LastErrorText(L"Renaming the device failed");
+			ok = false;
+		}
+		// no restart needed: Device Manager shows the new name at once
+	}
+	return ok;
+}
+
+bool DeviceNamesSet()
+{
+	auto nodes = NamedNodes();
+	if (nodes.empty())
+		return false;
+	for (auto& [node, name] : nodes)
+	{
+		DevSet ds;
+		if (!ds.Open(node.instanceId) || FriendlyName(ds) != name)
+			return false;
+	}
+	return true;
+}
+
+MicState Mic(std::wstring* service)
+{
+	Node mic;
+	if (!FindMic(mic))
+		return MicState::NotPlugged;
+	if (service)
+		*service = mic.service;
+	if (!IsAudioDriver(mic.service))
+		return MicState::WrongDriver;
+	return mic.problem ? MicState::NotStarted : MicState::Ok;
+}
+
+Result RepairMic(std::wstring& error)
+{
+	// Windows' audio driver failed to start: the PS3 Eye's audio function does that at random
+	// (code 10, on plug-in, restart or reinstall alike; no timing or power pattern found) and
+	// another try almost always works. Restart the existing node first, so it keeps its
+	// "PS3 Eye Microphone" name; removing it (below) would drop the name.
+	{
+		Node mic;
+		if (!FindMic(mic))
+			return Result::NotPlugged;
+		if (IsAudioDriver(mic.service) && mic.problem)
+		{
+			for (int attempt = 0; attempt < 6; attempt++)
+			{
+				DevSet ds;
+				if (!ds.Open(mic.instanceId))
+					break;
+				Restart(ds);
+				ds.Close();
+				if (WaitMicStarted())
+					return Result::Installed;
+			}
+		}
+	}
+
+	// A wrong driver, or restarts didn't help: remove the device node and let Windows set it up
+	// again (a device can have several stale packages from repeated Zadig runs: peel them off
+	// one by one). The caller re-applies the name afterwards.
+	for (int attempt = 0; attempt < 6; attempt++)
+	{
+		Node mic;
+		if (!FindMic(mic))
+			return Result::NotPlugged;
+		if (IsAudioDriver(mic.service) && !mic.problem)
+			return attempt == 0 ? Result::AlreadyInstalled : Result::Installed;
+
+		DevSet ds;
+		if (!ds.Open(mic.instanceId))
+		{
+			error = LastErrorText(L"Opening the microphone device failed");
+			return Result::Failed;
+		}
+
+		// the package that bound the wrong driver; deleted so the rescan can't pick it again
+		wchar_t inf[MAX_PATH] = L"";
+		HKEY drvKey = SetupDiOpenDevRegKey(ds.set, &ds.d, DICS_FLAG_GLOBAL, 0, DIREG_DRV, KEY_READ);
+		if (drvKey != INVALID_HANDLE_VALUE)
+		{
+			DWORD size = sizeof(inf) - sizeof(wchar_t), type = 0;
+			RegQueryValueExW(drvKey, L"InfPath", nullptr, &type, (BYTE*)inf, &size);
+			RegCloseKey(drvKey);
+		}
+
+		BOOL reboot = FALSE;
+		if (!DiUninstallDevice(nullptr, ds.set, &ds.d, 0, &reboot))
+		{
+			error = LastErrorText(L"Removing the microphone's driver failed");
+			return Result::Failed;
+		}
+		ds.Close();
+		if (!_wcsnicmp(inf, L"oem", 3) && !SetupUninstallOEMInfW(inf, SUOI_FORCEDELETE, nullptr))
+		{
+			error = LastErrorText((std::wstring(L"Deleting driver package ") + inf + L" failed").c_str());
+			return Result::Failed;
+		}
+
+		// let Windows bind its best match (usbaudio, from the inbox wdma_usb.inf), then wait
+		// until the start has succeeded or failed before judging it
+		Rescan();
+		WaitMicStarted();
+	}
+
+	std::wstring svc;
+	if (Mic(&svc) == MicState::NotStarted)
+		error = L"Windows' USB audio driver still can't start the microphone.";
+	else
+		error = svc.empty() ? L"Windows didn't give the microphone a driver." : L"The microphone still uses the '" + svc + L"' driver.";
+	return Result::Failed;
 }
 
 } // namespace usbdriver

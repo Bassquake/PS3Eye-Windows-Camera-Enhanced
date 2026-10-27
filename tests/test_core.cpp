@@ -107,7 +107,36 @@ static void TestYuv()
 		BGRXToYUY2(bgrx.data(), w, h, w * 4, yuy2.data(), w * 2);
 		CHECK(std::abs(yuy2[0] - t.y) <= 1 && std::abs(yuy2[1] - t.u) <= 1 && std::abs(yuy2[2] - t.y) <= 1 && std::abs(yuy2[3] - t.v) <= 1,
 			"YUY2 of (%d,%d,%d) wrong", t.r, t.g, t.b);
+		std::vector<uint8_t> i420(w * h * 3 / 2);
+		BGRXToI420(bgrx.data(), w, h, w * 4, i420.data(), w);
+		const int u = w * h, v = u + (w / 2) * (h / 2);
+		CHECK(std::abs(i420[0] - t.y) <= 1 && std::abs(i420[u] - t.u) <= 1 && std::abs(i420[u + 1] - t.u) <= 1 &&
+			std::abs(i420[v] - t.v) <= 1 && std::abs(i420[v + 1] - t.v) <= 1,
+			"I420 of (%d,%d,%d) wrong", t.r, t.g, t.b);
 	}
+}
+
+static void TestRgbAndHalve()
+{
+	const int w = 4, h = 2;
+	std::vector<uint8_t> bgrx(w * h * 4);
+	for (int i = 0; i < w * h; i++) { bgrx[i * 4] = (uint8_t)i; bgrx[i * 4 + 1] = (uint8_t)(i * 2); bgrx[i * 4 + 2] = (uint8_t)(i * 3); bgrx[i * 4 + 3] = 255; }
+
+	// bottom-up 24-bit: memory row 0 holds image row h-1
+	std::vector<uint8_t> bgr(w * h * 3);
+	BGRXToBGR(bgrx.data(), w, h, w * 4, bgr.data() + (h - 1) * w * 3, -(long)w * 3);
+	bool ok = true;
+	for (int y = 0; y < h; y++)
+		for (int x = 0; x < w; x++)
+			for (int c = 0; c < 3; c++)
+				ok &= bgr[((h - 1 - y) * w + x) * 3 + c] == bgrx[(y * w + x) * 4 + c];
+	CHECK(ok, "BGRX -> bottom-up BGR");
+
+	std::vector<uint8_t> half((w / 2) * (h / 2) * 4);
+	HalveBGRX(bgrx.data(), w, h, w * 4, half.data(), (w / 2) * 4);
+	// pixels 0,1,4,5 -> blue (0+1+4+5+2)/4 = 3 ; pixels 2,3,6,7 -> (2+3+6+7+2)/4 = 5
+	CHECK(half[0] == 3 && half[4] == 5 && half[1] == 5 && half[2] == 8 && half[3] == 255,
+		"2x2 downscale: got B%d B%d G%d R%d", half[0], half[4], half[1], half[2]);
 }
 
 // Build the USB byte stream the camera sends for one frame: 2048-byte payloads with a 12-byte header.
@@ -196,6 +225,7 @@ int main(int argc, char** argv)
 	TestDemosaicGradient();
 	TestBottomUp();
 	TestYuv();
+	TestRgbAndHalve();
 	TestFrameAssembly();
 	TestRates();
 

@@ -17,8 +17,19 @@ void BayerToBGRX(const uint8_t* bayer, int width, int height, uint8_t* dst, long
 void BGRXToNV12(const uint8_t* bgrx, int width, int height, long srcStride, uint8_t* dst, long dstStride);
 void BGRXToYUY2(const uint8_t* bgrx, int width, int height, long srcStride, uint8_t* dst, long dstStride);
 
+// Planar 4:2:0 (Y plane, then U, then V), as DirectShow's I420/IYUV. dstStride is the Y stride;
+// the chroma planes use half of it.
+void BGRXToI420(const uint8_t* bgrx, int width, int height, long srcStride, uint8_t* dst, long dstStride);
+
 // Copies BGRX rows into a destination with a different stride.
 void CopyBGRX(const uint8_t* bgrx, int width, int height, long srcStride, uint8_t* dst, long dstStride);
+
+// Packs BGRX into 24-bit B,G,R. dstStride may be negative (bottom-up DIBs).
+void BGRXToBGR(const uint8_t* bgrx, int width, int height, long srcStride, uint8_t* dst, long dstStride);
+
+// Halves a BGRX image in both directions (2x2 box filter): 640x480 -> 320x240.
+// width/height are the source size and must be even.
+void HalveBGRX(const uint8_t* src, int width, int height, long srcStride, uint8_t* dst, long dstStride);
 
 // Fills a BGRX image with the "no camera" placeholder: dark grey with a camera icon
 // crossed out, so apps keep running while the PS3 Eye is unplugged.

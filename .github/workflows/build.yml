@@ -32,16 +32,28 @@ jobs:
       - name: Unit tests
         run: ctest --test-dir build -C Release --output-on-failure
 
+      - name: 32-bit DirectShow filter
+        run: |
+          cmake -S . -B build32 -A Win32 -DPS3EYE_FILTER_ONLY=ON
+          cmake --build build32 --config Release
+
       - name: Installer
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item build/Release/PS3EyeVCam.dll, build/Release/PS3EyeSetup.exe, README.md dist/
-          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          Copy-Item build/Release/PS3EyeVCam.dll, build/Release/PS3EyeSetup.exe, build/Release/PS3EyeServer.exe, build/Release/PS3EyeDShow64.dll, build32/Release/PS3EyeDShow32.dll, README.md dist/
+          # Inno Setup 6 or 7 (7 installs under Program Files, 6 under Program Files (x86))
+          $candidates = "$env:ProgramFiles\Inno Setup 7\ISCC.exe", "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+          $iscc = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) {
+            choco install innosetup -y --no-progress | Out-Null
+            $iscc = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          }
+          if (-not $iscc) { Write-Error "Inno Setup (ISCC.exe) not found after install"; exit 1 }
+          Write-Host "Using $iscc"
           & $iscc /Q "/DAppVersion=$env:APPVERSION" "/DDistDir=$PWD\dist" installer\PS3EyeCamera.iss
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          Compress-Archive -Force -Path dist/PS3EyeSetup.exe, dist/PS3EyeVCam.dll, dist/README.md -DestinationPath "dist/PS3EyeCamera-$env:APPVERSION-portable.zip"
+          Compress-Archive -Force -Path dist/PS3EyeSetup.exe, dist/PS3EyeVCam.dll, dist/PS3EyeServer.exe, dist/PS3EyeDShow64.dll, dist/PS3EyeDShow32.dll, dist/README.md -DestinationPath "dist/PS3EyeCamera-$env:APPVERSION-portable.zip"
 
       - uses: actions/upload-artifact@v4
         with:

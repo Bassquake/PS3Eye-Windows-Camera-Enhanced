@@ -1,7 +1,7 @@
 {
   "name": "ps3eye-vcam",
   "version": "1.0.0",
-  "description": "PS3 Eye camera as a native Windows 11 webcam",
+  "description": "PS3 Eye camera as a native Windows 10/11 webcam",
   "dependencies": [
     { "name": "libusb", "platform": "windows" },
     { "name": "wil", "platform": "windows" },

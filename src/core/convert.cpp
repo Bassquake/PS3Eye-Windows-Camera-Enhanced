@@ -140,10 +140,86 @@ void BGRXToYUY2(const uint8_t* src, int w, int h, long srcStride, uint8_t* dst, 
 	}
 }
 
+void BGRXToI420(const uint8_t* src, int w, int h, long srcStride, uint8_t* dst, long dstStride)
+{
+	const long cStride = dstStride / 2;
+	uint8_t* uPlane = dst + (long)h * dstStride;
+	uint8_t* vPlane = uPlane + (long)((h + 1) / 2) * cStride;
+	for (int y = 0; y < h; y += 2)
+	{
+		const uint8_t* s0 = src + (long)y * srcStride;
+		const uint8_t* s1 = (y + 1 < h) ? s0 + srcStride : s0;
+		uint8_t* y0 = dst + (long)y * dstStride;
+		uint8_t* y1 = (y + 1 < h) ? y0 + dstStride : nullptr;
+		uint8_t* u = uPlane + (long)(y / 2) * cStride;
+		uint8_t* v = vPlane + (long)(y / 2) * cStride;
+
+		for (int x = 0; x < w; x += 2)
+		{
+			const uint8_t* p00 = s0 + x * 4;
+			const uint8_t* p01 = (x + 1 < w) ? p00 + 4 : p00;
+			const uint8_t* p10 = s1 + x * 4;
+			const uint8_t* p11 = (x + 1 < w) ? p10 + 4 : p10;
+
+			y0[x] = ToY(p00[2], p00[1], p00[0]);
+			if (x + 1 < w)
+				y0[x + 1] = ToY(p01[2], p01[1], p01[0]);
+			if (y1)
+			{
+				y1[x] = ToY(p10[2], p10[1], p10[0]);
+				if (x + 1 < w)
+					y1[x + 1] = ToY(p11[2], p11[1], p11[0]);
+			}
+
+			int r = (p00[2] + p01[2] + p10[2] + p11[2] + 2) >> 2;
+			int g = (p00[1] + p01[1] + p10[1] + p11[1] + 2) >> 2;
+			int b = (p00[0] + p01[0] + p10[0] + p11[0] + 2) >> 2;
+			u[x / 2] = ToU(r, g, b);
+			v[x / 2] = ToV(r, g, b);
+		}
+	}
+}
+
 void CopyBGRX(const uint8_t* src, int w, int h, long srcStride, uint8_t* dst, long dstStride)
 {
 	for (int y = 0; y < h; y++)
 		memcpy(dst + (long)y * dstStride, src + (long)y * srcStride, (size_t)w * 4);
+}
+
+void BGRXToBGR(const uint8_t* src, int w, int h, long srcStride, uint8_t* dst, long dstStride)
+{
+	for (int y = 0; y < h; y++)
+	{
+		const uint8_t* s = src + (long)y * srcStride;
+		uint8_t* d = dst + (long)y * dstStride;
+		for (int x = 0; x < w; x++)
+		{
+			d[0] = s[0];
+			d[1] = s[1];
+			d[2] = s[2];
+			s += 4;
+			d += 3;
+		}
+	}
+}
+
+void HalveBGRX(const uint8_t* src, int w, int h, long srcStride, uint8_t* dst, long dstStride)
+{
+	for (int y = 0; y + 1 < h; y += 2)
+	{
+		const uint8_t* s0 = src + (long)y * srcStride;
+		const uint8_t* s1 = s0 + srcStride;
+		uint8_t* d = dst + (long)(y / 2) * dstStride;
+		for (int x = 0; x + 1 < w; x += 2)
+		{
+			for (int c = 0; c < 3; c++)
+				d[c] = (uint8_t)((s0[c] + s0[4 + c] + s1[c] + s1[4 + c] + 2) >> 2);
+			d[3] = 0xFF;
+			s0 += 8;
+			s1 += 8;
+			d += 4;
+		}
+	}
 }
 
 void DrawNoSignal(uint8_t* img, int w, int h, long stride)
