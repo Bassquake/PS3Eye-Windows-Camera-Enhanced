@@ -4,6 +4,8 @@ This is a fork of [ps3eye-windows-camera](https://github.com/aasmh/ps3eye-window
 
 ## Enhancements
 
+I found many PS3 Eye drivers just wasn't very stable and would intermittently work so I forked aasmh's build and added enhancements to it:
+
 - Makes the PlayStation 3 Eye show up on Windows 10 and 11 as a normal webcam called **"PS3 Eye Camera"** in Zoom, Discord, Teams, OBS, browsers and (on Windows 11) the Windows Camera app.
 - Built for ARM64, x86 and x64.
 - Can adjust the camera properties such as Brightness and Contrast. All available frame rates should be visible to apps.
