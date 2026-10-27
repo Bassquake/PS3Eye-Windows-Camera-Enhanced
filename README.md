@@ -20,6 +20,8 @@ No admin rights to install things? The portable zip works too: unzip, run `PS3Ey
 
 **32-bit Windows 10**: the same installer works here too and installs the 32-bit (x86) version by itself; the portable one is the `x86-portable` zip. It hasn't been tried on 32-bit Windows yet either.
 
+**Linux**: you don't need this project. Linux supports the PS3 Eye out of the box (the kernel's `gspca_ov534` driver): plug it in and it's a normal webcam (`/dev/video0`) in every app, and the microphone array works as a USB sound card. Change brightness, exposure, gain and so on with `v4l2-ctl`, `guvcview` or OBS. The kernel driver goes up to 60 fps at 640x480 and 125 fps at 320x240.
+
 Quick check: open **PS3 Eye Camera Settings** and choose `2` (Test). It grabs 3 seconds of video, shows the fps and saves a snapshot. From a command prompt you can test other modes too, e.g. `PS3EyeSetup test 640 75` or `PS3EyeSetup test 320 187`.
 
 Microphone check: choose `6` (Test the microphone). It records 3 seconds, shows a level bar for each of the 4 mics, and plays the recording back on your speakers (boosted, since the PS3 Eye records quietly). Same from a command prompt: `PS3EyeSetup mictest`.
