@@ -1,4 +1,4 @@
-; Installer wizard for PS3 Eye Camera. Built by build.bat / GitHub Actions with Inno Setup 6:
+; Installer wizard for PS3 Eye Camera. Built by build.bat with Inno Setup 6 or 7:
 ;   ISCC.exe /DAppVersion=1.0.0 /DDistDir=..\dist installer\PS3EyeCamera.iss
 ;
 ; The wizard stages the files in {app}\installer and runs "PS3EyeSetup.exe install" from there.

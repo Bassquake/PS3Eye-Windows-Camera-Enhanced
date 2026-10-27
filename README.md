@@ -58,11 +58,7 @@ Log file: `C:\ProgramData\PS3EyeVCam\vcam.log`
 
 ## Build it yourself
 
-**GitHub:** every push builds the installer (*Actions* tab → latest run → artifacts).
-
-**Publishing a new version:** change the version at the top of `build.bat` and `publish.bat`, run `build.bat`, then `publish.bat`.
-
-**Local:** double-click `build.bat`. It installs the free C++ build tools and Inno Setup if needed, then builds the installer and portable zip into `dist\`. Change the version at the top of `build.bat`.
+Double-click `build.bat`. It installs the free C++ build tools and Inno Setup if needed, then builds the installer and portable zip into `dist\`. Change the version at the top of `build.bat`.
 
 ## How it works
 
