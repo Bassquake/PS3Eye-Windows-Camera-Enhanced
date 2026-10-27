@@ -6,6 +6,7 @@
 // Windows 10 has no virtual camera API, so there it registers a DirectShow capture filter
 // (PS3EyeDShow64.dll / PS3EyeDShow32.dll) fed by PS3EyeServer.exe.
 #include <windows.h>
+#include <aclapi.h>
 #include <shellapi.h>
 #include <shlobj.h>
 #include <dshow.h>
@@ -271,6 +272,42 @@ void DeleteDShowKeys()
 	}
 }
 
+// Lets users and LOCAL SERVICE read and set values in the settings key (not create subkeys or
+// change its permissions).
+bool AllowSettingsChanges(HKEY key)
+{
+	PACL dacl = nullptr;
+	PSECURITY_DESCRIPTOR sd = nullptr;
+	if (GetSecurityInfo(key, SE_REGISTRY_KEY, DACL_SECURITY_INFORMATION, nullptr, nullptr, &dacl, nullptr, &sd) != ERROR_SUCCESS)
+		return false;
+
+	BYTE users[SECURITY_MAX_SID_SIZE], service[SECURITY_MAX_SID_SIZE];
+	DWORD usersSize = sizeof(users), serviceSize = sizeof(service);
+	bool ok = CreateWellKnownSid(WinBuiltinUsersSid, nullptr, users, &usersSize) &&
+		CreateWellKnownSid(WinLocalServiceSid, nullptr, service, &serviceSize);
+	PACL updated = nullptr;
+	if (ok)
+	{
+		EXPLICIT_ACCESSW access[2]{};
+		PSID sids[2] = { users, service };
+		for (int i = 0; i < 2; i++)
+		{
+			access[i].grfAccessPermissions = KEY_READ | KEY_SET_VALUE;
+			access[i].grfAccessMode = GRANT_ACCESS;
+			access[i].grfInheritance = NO_INHERITANCE;
+			access[i].Trustee.TrusteeForm = TRUSTEE_IS_SID;
+			access[i].Trustee.TrusteeType = TRUSTEE_IS_WELL_KNOWN_GROUP;
+			access[i].Trustee.ptstrName = (LPWSTR)sids[i];
+		}
+		ok = SetEntriesInAclW(2, access, dacl, &updated) == ERROR_SUCCESS &&
+			SetSecurityInfo(key, SE_REGISTRY_KEY, DACL_SECURITY_INFORMATION, nullptr, nullptr, updated, nullptr) == ERROR_SUCCESS;
+	}
+	if (updated)
+		LocalFree(updated);
+	LocalFree(sd);
+	return ok;
+}
+
 void StopServer()
 {
 	RunHidden(std::wstring(L"taskkill.exe /f /im ") + kServerExe);
@@ -278,7 +315,7 @@ void StopServer()
 
 bool ServerRunning()
 {
-	HANDLE m = OpenMutexW(SYNCHRONIZE, FALSE, L"Local\\PS3EyeVCam.Server"); // see SharedFrames.cpp
+	HANDLE m = OpenMutexW(SYNCHRONIZE, FALSE, L"Local\\PS3EyeVCam.Server.2"); // see SharedFrames.cpp
 	if (m)
 		CloseHandle(m);
 	return m != nullptr;
@@ -748,10 +785,18 @@ int Install()
 	else
 		Bad(L"Microphone auto-fix task: " + taskError + L" (if the mic stops after a replug, run Install)");
 
-	// settings key must exist so the camera can watch it for live changes
+	// settings key must exist so the camera can watch it for live changes, and apps change image
+	// settings through it (brightness etc. in their camera dialogs), so users and the camera
+	// service (LOCAL SERVICE) may set values
 	HKEY settingsKey = nullptr;
-	if (RegCreateKeyExW(HKEY_LOCAL_MACHINE, vcam::kRegKey, 0, nullptr, 0, KEY_READ, nullptr, &settingsKey, nullptr) == ERROR_SUCCESS)
+	if (RegCreateKeyExW(HKEY_LOCAL_MACHINE, vcam::kRegKey, 0, nullptr, 0, KEY_READ | WRITE_DAC, nullptr, &settingsKey, nullptr) == ERROR_SUCCESS)
+	{
+		if (AllowSettingsChanges(settingsKey))
+			Ok(L"Apps can change the image settings");
+		else
+			Bad(L"Apps won't be able to change the image settings (use option 3 here instead)");
 		RegCloseKey(settingsKey);
+	}
 
 	if (dshow)
 	{
@@ -929,12 +974,17 @@ bool SaveBmp(const std::wstring& path, const std::vector<uint8_t>& bgrx, int w, 
 	return true;
 }
 
-int Test()
+// width 640 or 320; fps is rounded down to a rate the sensor has
+int Test(uint32_t width = 640, uint32_t fps = 60)
 {
-	Title(L"Camera test (3 seconds at 640x480, 60 fps)");
+	const uint32_t height = width == 320 ? 240 : 480;
+	fps = ps3eye::Camera::SupportedFps(width, fps);
+	wchar_t title[96];
+	swprintf_s(title, L"Camera test (3 seconds at %ux%u, %u fps)", width, height, fps);
+	Title(title);
 	vcam::Config cfg = vcam::LoadConfig();
 	ps3eye::Camera cam;
-	auto st = cam.Start(640, 480, 60, cfg.camera, cfg.deviceIndex);
+	auto st = cam.Start(width, height, fps, cfg.camera, cfg.deviceIndex);
 	if (st != ps3eye::Status::Ok)
 	{
 		Bad(Widen(ps3eye::StatusText(st)));
@@ -944,7 +994,7 @@ int Test()
 		return 1;
 	}
 
-	std::vector<uint8_t> bayer, bgrx(640 * 480 * 4);
+	std::vector<uint8_t> bayer, bgrx((size_t)width * height * 4);
 	int frames = 0;
 	auto start = std::chrono::steady_clock::now();
 	while (std::chrono::steady_clock::now() - start < std::chrono::seconds(3))
@@ -966,11 +1016,12 @@ int Test()
 
 	wchar_t line[128];
 	swprintf_s(line, L"%d frames in %.1f s = %.1f fps", frames, secs, frames / secs);
-	(frames / secs > 50 ? Ok : Bad)(line);
+	(frames / secs > fps * 0.85 ? Ok : Bad)(line);
 
-	ps3eye::BayerToBGRX(bayer.data(), 640, 480, bgrx.data(), 640 * 4);
+	ps3eye::BayerToBGRX(bayer.data(), (int)width, (int)height, bgrx.data(), (long)width * 4);
+	ps3eye::AdjustBGRX(bgrx.data(), (int)width, (int)height, (long)width * 4, vcam::ImageAdjustFor(cfg.camera));
 	std::wstring snap = TestFolder() + L"\\ps3eye_snapshot.bmp";
-	if (SaveBmp(snap, bgrx, 640, 480))
+	if (SaveBmp(snap, bgrx, (int)width, (int)height))
 	{
 		Ok(L"Snapshot saved: " + snap);
 		ShowInFolder(snap);
@@ -1239,8 +1290,9 @@ void ShowSettings()
 	const vcam::ConfigItem* items = vcam::ConfigItems(&n);
 	vcam::Config def;
 	ps3eye::Settings d = def.camera;
-	const int defaults[] = { d.autoGain, d.autoWhiteBalance, d.gain, d.exposure, d.brightness, d.contrast, d.sharpness, d.hue,
-		d.redBalance, d.greenBalance, d.blueBalance, d.flipH, d.flipV, 0 };
+	const int defaults[] = { d.autoGain, d.autoWhiteBalance, d.gain, d.exposure, d.brightness, d.contrast, d.saturation, d.hue,
+		d.sharpness, d.redBalance, d.greenBalance, d.blueBalance, d.flipH, d.flipV, 0 };
+	static_assert(std::size(defaults) == 15, "one default per ConfigItems() entry, in the same order");
 	for (size_t i = 0; i < n; i++)
 	{
 		bool present = false;
@@ -1351,8 +1403,9 @@ int Menu()
 
 void Usage()
 {
-	wprintf(L"PS3EyeSetup [install | uninstall | status | test | mictest | settings | set <Name> <Value> | reset | log]\n"
-		L"No argument opens the menu.\n");
+	wprintf(L"PS3EyeSetup [install | uninstall | status | test [640|320] [fps] | mictest | settings | set <Name> <Value> | reset | log]\n"
+		L"No argument opens the menu. test runs 640x480 at 60 fps unless told otherwise\n"
+		L"(up to 75 fps at 640x480, 187 at 320x240).\n");
 }
 
 } // namespace
@@ -1375,7 +1428,18 @@ int wmain(int argc, wchar_t** argv)
 		if (cmd == L"install") rc = Install();
 		else if (cmd == L"uninstall") rc = Uninstall();
 		else if (cmd == L"status") rc = Status() ? 1 : 0;
-		else if (cmd == L"test") rc = Test();
+		else if (cmd == L"test" && argc <= 4)
+		{
+			const uint32_t width = argc >= 3 && _wtoi(argv[2]) == 320 ? 320 : 640;
+			const int fps = argc >= 4 ? _wtoi(argv[3]) : 60;
+			if (argc >= 3 && _wtoi(argv[2]) != 320 && _wtoi(argv[2]) != 640)
+			{
+				Usage();
+				rc = 2;
+			}
+			else
+				rc = Test(width, (uint32_t)std::max(fps, 1));
+		}
 		else if (cmd == L"settings") ShowSettings();
 		else if (cmd == L"set" && argc == 4) rc = Set(argv[2], argv[3]);
 		else if (cmd == L"reset") rc = Reset();

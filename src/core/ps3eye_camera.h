@@ -24,19 +24,23 @@ namespace ps3eye {
 constexpr uint16_t kVendorId = 0x1415;
 constexpr uint16_t kProductId = 0x2000;
 
+// Gain, exposure, white balance and flips are set on the sensor. Brightness, contrast, saturation,
+// hue and sharpness are done on the PC (convert.h, ImageAdjust): the sensor's own versions only
+// work in its YUV mode, and the camera runs in raw Bayer mode.
 struct Settings
 {
 	bool autoGain = true;          // auto gain + auto exposure
 	bool autoWhiteBalance = true;
-	uint8_t gain = 20;             // 0..63   (used when autoGain is off)
-	uint8_t exposure = 120;        // 0..255  (used when autoGain is off)
-	uint8_t brightness = 20;
-	uint8_t contrast = 37;
-	uint8_t sharpness = 0;
-	uint8_t hue = 143;
-	uint8_t redBalance = 128;      // used when autoWhiteBalance is off
-	uint8_t greenBalance = 128;
-	uint8_t blueBalance = 128;
+	int gain = 20;                 // 0..63   (used when autoGain is off)
+	int exposure = 120;            // 0..255  (used when autoGain is off)
+	int brightness = 128;          // 0..255, 128 = unchanged
+	int contrast = 128;            // 0..255, 128 = unchanged
+	int saturation = 128;          // 0..255, 128 = unchanged, 0 = black and white
+	int hue = 0;                   // 0..359 degrees
+	int sharpness = 0;             // 0..63, 0 = off
+	int redBalance = 128;          // 0..255, used when autoWhiteBalance is off
+	int greenBalance = 128;
+	int blueBalance = 128;
 	bool flipH = false;
 	bool flipV = false;
 };
@@ -87,7 +91,7 @@ public:
 	uint32_t Height() const { return _height; }
 	uint32_t Fps() const { return _fps; }
 
-	// Picks the real sensor rate for a requested rate (same rule Start uses).
+	// Picks the real sensor rate for a requested rate (same rule Start uses). All rates: rates.h.
 	static uint32_t SupportedFps(uint32_t width, uint32_t fps);
 
 	// internal: called from the libusb event thread

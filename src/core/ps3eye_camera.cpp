@@ -790,7 +790,7 @@ void Camera::ApplyLocked(const Settings& s)
 		SccbWrite(0x13, 0xf0); // AGC, AEC, AWB off
 		SccbWrite(0x64, SccbRead(0x64) & 0xFC);
 
-		uint8_t g = s.gain;
+		uint8_t g = (uint8_t)std::clamp(s.gain, 0, 63);
 		switch (g & 0x30)
 		{
 		case 0x00: g &= 0x0F; break;
@@ -798,24 +798,20 @@ void Camera::ApplyLocked(const Settings& s)
 		case 0x20: g = (g & 0x0F) | 0x70; break;
 		case 0x30: g = (g & 0x0F) | 0xF0; break;
 		}
+		const int exposure = std::clamp(s.exposure, 0, 255);
 		SccbWrite(0x00, g);
-		SccbWrite(0x08, s.exposure >> 7);
-		SccbWrite(0x10, (uint8_t)(s.exposure << 1));
+		SccbWrite(0x08, (uint8_t)(exposure >> 7));
+		SccbWrite(0x10, (uint8_t)(exposure << 1));
 	}
 
 	SccbWrite(0x63, s.autoWhiteBalance ? 0xe0 : 0xAA);
 	if (!s.autoWhiteBalance)
 	{
-		SccbWrite(0x43, s.redBalance);
-		SccbWrite(0x42, s.blueBalance);
-		SccbWrite(0x44, s.greenBalance);
+		// relative to the channel gains auto white balance last settled on (0x01-0x03 hold them)
+		SccbWrite(0x43, (uint8_t)std::clamp(s.redBalance, 0, 255));
+		SccbWrite(0x42, (uint8_t)std::clamp(s.blueBalance, 0, 255));
+		SccbWrite(0x44, (uint8_t)std::clamp(s.greenBalance, 0, 255));
 	}
-
-	SccbWrite(0x01, s.hue);
-	SccbWrite(0x9B, s.brightness);
-	SccbWrite(0x9C, s.contrast);
-	SccbWrite(0x91, s.sharpness); // VGA noise
-	SccbWrite(0x8E, s.sharpness); // QVGA noise
 
 	// the sensor is mounted mirrored: the bits *un*-flip the image
 	uint8_t v = SccbRead(0x0c) & ~0xc0;

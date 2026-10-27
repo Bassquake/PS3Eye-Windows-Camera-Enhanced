@@ -21,21 +21,29 @@ struct Mode
 
 // Index 0 is the default. NV12 first: it's what most capture pipelines (Zoom, Teams,
 // Discord, browsers, Windows Camera) ask for. 640x480 is the sensor's full resolution.
+// Every rate here is one the sensor really runs at (rates.h); 75 and 187 are the maximums.
 const Mode kModes[] = {
 	{ &MFVideoFormat_NV12, 640, 480, 30 },
 	{ &MFVideoFormat_NV12, 640, 480, 60 },
+	{ &MFVideoFormat_NV12, 640, 480, 75 },
 	{ &MFVideoFormat_YUY2, 640, 480, 30 },
 	{ &MFVideoFormat_YUY2, 640, 480, 60 },
+	{ &MFVideoFormat_YUY2, 640, 480, 75 },
 	{ &MFVideoFormat_RGB32, 640, 480, 30 },
 	{ &MFVideoFormat_RGB32, 640, 480, 60 },
+	{ &MFVideoFormat_RGB32, 640, 480, 75 },
 	{ &MFVideoFormat_NV12, 320, 240, 30 },
 	{ &MFVideoFormat_NV12, 320, 240, 60 },
-	{ &MFVideoFormat_NV12, 320, 240, 120 },
+	{ &MFVideoFormat_NV12, 320, 240, 125 },
 	{ &MFVideoFormat_NV12, 320, 240, 187 },
 	{ &MFVideoFormat_YUY2, 320, 240, 30 },
 	{ &MFVideoFormat_YUY2, 320, 240, 60 },
+	{ &MFVideoFormat_YUY2, 320, 240, 125 },
+	{ &MFVideoFormat_YUY2, 320, 240, 187 },
 	{ &MFVideoFormat_RGB32, 320, 240, 30 },
 	{ &MFVideoFormat_RGB32, 320, 240, 60 },
+	{ &MFVideoFormat_RGB32, 320, 240, 125 },
+	{ &MFVideoFormat_RGB32, 320, 240, 187 },
 };
 
 UINT32 BytesPerFrame(const GUID& subtype, UINT32 w, UINT32 h)
@@ -251,6 +259,7 @@ void MediaStream::CaptureLoop()
 	std::vector<uint8_t> bgrx((size_t)w * h * 4);
 
 	vcam::Config config = vcam::LoadConfig();
+	ps3eye::ImageAdjust adjust = vcam::ImageAdjustFor(config.camera);
 	ps3eye::Camera camera;
 	ps3eye::Status lastStatus = ps3eye::Status::Ok; // only log a failure when it changes
 
@@ -309,6 +318,7 @@ void MediaStream::CaptureLoop()
 			{
 				auto time = MFGetSystemTime();
 				ps3eye::BayerToBGRX(bayer.data(), (int)w, (int)h, bgrx.data(), (long)w * 4);
+				ps3eye::AdjustBGRX(bgrx.data(), (int)w, (int)h, (long)w * 4, adjust);
 				Deliver(bgrx.data(), time);
 				lastFrame = Clock::now();
 
@@ -349,6 +359,7 @@ void MediaStream::CaptureLoop()
 			else
 				camera.Apply(next.camera);
 			config = next;
+			adjust = vcam::ImageAdjustFor(config.camera);
 			watchSettings();
 		}
 	}

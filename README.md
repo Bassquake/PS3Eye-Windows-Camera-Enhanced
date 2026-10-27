@@ -16,7 +16,7 @@ Afterwards, **PS3 Eye Camera Settings** in the Start menu lets you test the came
 
 No admin rights to install things? The portable zip works too: unzip, run `PS3EyeSetup.exe`, press `1`.
 
-Quick check: open **PS3 Eye Camera Settings** and choose `2` (Test). It grabs 3 seconds of video, shows the fps and saves a snapshot.
+Quick check: open **PS3 Eye Camera Settings** and choose `2` (Test). It grabs 3 seconds of video, shows the fps and saves a snapshot. From a command prompt you can test other modes too, e.g. `PS3EyeSetup test 640 75` or `PS3EyeSetup test 320 187`.
 
 Microphone check: choose `6` (Test the microphone). It records 3 seconds, shows a level bar for each of the 4 mics, and plays the recording back on your speakers (boosted, since the PS3 Eye records quietly). Same from a command prompt: `PS3EyeSetup mictest`.
 
@@ -24,20 +24,23 @@ Both tests save their result in *Documents\PS3 Eye Camera Tests* (`ps3eye_snapsh
 
 ## Image settings
 
-Menu option `3`, or from a command prompt:
+Apps can change them from their own camera settings (OBS: *Properties → Configure Video*; anything else that offers brightness, contrast and so on): brightness, contrast, saturation, hue, sharpness, gain and exposure (auto or manual), white balance (auto, or a colour temperature) and mirror/flip. Or use menu option `3`, or a command prompt:
 
 ```
 PS3EyeSetup set FlipHorizontal 1
 PS3EyeSetup set AutoGain 0
 PS3EyeSetup set Exposure 200
+PS3EyeSetup set Saturation 0
 PS3EyeSetup reset
 ```
 
-Changes apply live, even during a call. Defaults: auto gain/exposure and auto white balance on.
+Either way it's one shared set of settings: it's saved, every app sees the same values, and changes apply live, even during a call. Defaults: auto gain/exposure and auto white balance on, everything else neutral.
+
+Gain, exposure, white balance and flips are set on the camera's sensor. Brightness, contrast, saturation, hue and sharpness are applied on the PC, because the sensor only does them in a mode the PS3 Eye can't stream fast enough over USB; they cost some CPU while they're away from their defaults.
 
 ## Formats offered
 
-640×480 at 30/60 fps and 320×240 at 30/60/120/187 fps, in NV12, YUY2 and RGB32. Apps pick what they want.
+640×480 at up to 75 fps and 320×240 at up to 187 fps (every rate the sensor has: 2–75 and 2–187), in NV12, YUY2 and RGB32 on Windows 11, plus I420 and RGB24 on Windows 10. Apps pick what they want.
 
 ## If something's wrong
 
@@ -73,7 +76,7 @@ Zoom / Discord / Teams ◄── Windows Camera Frame Server ◄── media sou
 Windows 10 (no virtual camera API):
 
 ```
-PS3 Eye ──USB/WinUSB──► PS3EyeServer.exe ──shared memory (640×480 BGRX)──► DirectShow filter in each app
+PS3 Eye ──USB/WinUSB──► PS3EyeServer.exe ──shared memory (BGRX frames)──► DirectShow filter in each app
                        (libusb + demosaic)                                  (PS3EyeDShow64/32.dll)
                                                                                    │
                                           Zoom / Teams / Discord / OBS / browsers ◄┘ YUY2/NV12/I420/RGB24/RGB32
@@ -90,7 +93,7 @@ PS3 Eye ──USB/WinUSB──► PS3EyeServer.exe ──shared memory (640×480
 - The PS3 Eye's 4-mic array (4 channels, 16 kHz) is handled by Windows' own USB audio driver and shows up as *Microphone (PS3 Eye Microphone)*. If an old Zadig install put a different driver on it (often "USB Serial (CDC)", making it appear as a COM port), Install puts Windows' audio driver back. The mic's USB audio part sometimes fails to start (at random: on plug-in, after a restart or a driver reinstall). Install retries until it starts, and a small scheduled task (*PS3 Eye Camera microphone fix*, runs `PS3EyeSetup micwatch` as SYSTEM from startup) does the same automatically within seconds of a plug-in or within 15 s otherwise. Uninstall removes it.
 - Device Manager lists the camera as *PS3 Eye Camera* and its mic as *PS3 Eye Microphone* instead of *USB Camera-B4.09.24.1*. Install sets the names, and the microphone task re-applies them (on another USB port, or after a mic repair), so apps list the mic as *Microphone (PS3 Eye Microphone)*.
 - Max resolution is the sensor's 640×480.
-- Windows 10: 640×480 and 320×240 at up to 60 fps (the 120/187 fps modes are Windows 11 only). Store apps such as the Camera app and Windows Hello only list real webcams there, so they won't see it.
+- Windows 10: all apps share one camera stream, so it runs at the fastest rate any of them asks for. 320×240 above 75 fps needs the sensor in its 320×240 mode, so it only happens while every app using the camera wants 320×240; otherwise those apps get up to 75 fps. Store apps such as the Camera app and Windows Hello only list real webcams there, so they won't see it.
 
 ## License
 

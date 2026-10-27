@@ -2,7 +2,7 @@
 rem One-click build: double-click this file. Output (installer, portable zip) goes to .\dist
 setlocal
 cd /d "%~dp0"
-set "APPVERSION=1.0.0"
+set "APPVERSION=1.1.0"
 title PS3 Eye driver build
 
 rem ---- 1. find the Visual Studio C++ compiler (install it if missing) ----

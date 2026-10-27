@@ -1,7 +1,8 @@
 // "PS3 Eye Camera" as a DirectShow video capture source (Windows 10 path). Registered in the
 // video input device category, so Zoom, Teams, Discord, OBS and browsers list it like a webcam.
 // One output pin; its streaming thread reads frames that PS3EyeServer.exe shares (SharedFrames.h)
-// and pushes them downstream in the negotiated format.
+// and pushes them downstream in the negotiated format. Image controls (IAMVideoProcAmp,
+// IAMCameraControl, IAMVideoControl flips, the standard property pages) go through Controls.h.
 //
 // Written against the raw DirectShow interfaces (no base classes). Locking: the filter's lock
 // guards state and the pin's connection; the streaming thread never takes it while delivering,
@@ -72,7 +73,7 @@ private:
 	HRESULT DecideAllocator(IMemInputPin* input, const StreamFormat& format);
 	void ReleaseConnection();
 	void Stream(StreamFormat format);
-	void Deliver(const uint8_t* bgrx, uint8_t* scratch, StreamFormat& format, REFERENCE_TIME fallbackTime, bool& first);
+	void Deliver(const uint8_t* bgrx, int srcWidth, int srcHeight, uint8_t* scratch, StreamFormat& format, REFERENCE_TIME fallbackTime, bool& first);
 
 	Filter* _filter;
 	IPin* _connected = nullptr;
@@ -83,9 +84,43 @@ private:
 
 	std::thread _thread;
 	std::atomic<bool> _quit{ false };
+	std::atomic<LONGLONG> _actualInterval{ 0 };   // measured time between delivered frames (100 ns)
+	friend class Filter;
 };
 
-class Filter final : public IBaseFilter, public IAMFilterMiscFlags
+// IAMVideoProcAmp and IAMCameraControl have identically shaped methods, so each lives in its own
+// object; both share the filter's lifetime like the pin does.
+class ProcAmp final : public IAMVideoProcAmp
+{
+public:
+	explicit ProcAmp(Filter* filter) : _filter(filter) {}
+	STDMETHODIMP QueryInterface(REFIID riid, void** ppv) override;
+	STDMETHODIMP_(ULONG) AddRef() override;
+	STDMETHODIMP_(ULONG) Release() override;
+	STDMETHODIMP GetRange(long prop, long* min, long* max, long* step, long* def, long* caps) override;
+	STDMETHODIMP Set(long prop, long value, long flags) override;
+	STDMETHODIMP Get(long prop, long* value, long* flags) override;
+
+private:
+	Filter* _filter;
+};
+
+class CameraControl final : public IAMCameraControl
+{
+public:
+	explicit CameraControl(Filter* filter) : _filter(filter) {}
+	STDMETHODIMP QueryInterface(REFIID riid, void** ppv) override;
+	STDMETHODIMP_(ULONG) AddRef() override;
+	STDMETHODIMP_(ULONG) Release() override;
+	STDMETHODIMP GetRange(long prop, long* min, long* max, long* step, long* def, long* caps) override;
+	STDMETHODIMP Set(long prop, long value, long flags) override;
+	STDMETHODIMP Get(long prop, long* value, long* flags) override;
+
+private:
+	Filter* _filter;
+};
+
+class Filter final : public IBaseFilter, public IAMFilterMiscFlags, public IAMVideoControl, public ISpecifyPropertyPages
 {
 public:
 	Filter();
@@ -117,8 +152,21 @@ public:
 	// IAMFilterMiscFlags
 	STDMETHODIMP_(ULONG) GetMiscFlags() override;
 
+	// IAMVideoControl (mirror/flip, frame-rate lists)
+	STDMETHODIMP GetCaps(IPin* pin, long* flags) override;
+	STDMETHODIMP SetMode(IPin* pin, long mode) override;
+	STDMETHODIMP GetMode(IPin* pin, long* mode) override;
+	STDMETHODIMP GetCurrentActualFrameRate(IPin* pin, LONGLONG* interval) override;
+	STDMETHODIMP GetMaxAvailableFrameRate(IPin* pin, long index, SIZE dimensions, LONGLONG* interval) override;
+	STDMETHODIMP GetFrameRateList(IPin* pin, long index, SIZE dimensions, long* count, LONGLONG** intervals) override;
+
+	// ISpecifyPropertyPages (Windows' own Video Proc Amp and Camera Control pages)
+	STDMETHODIMP GetPages(CAUUID* pages) override;
+
 private:
 	friend class Pin;
+	friend class ProcAmp;
+	friend class CameraControl;
 
 	// stream time now, or false when there's no clock / not running
 	bool StreamTime(REFERENCE_TIME& t);
@@ -132,6 +180,8 @@ private:
 	IFilterGraph* _graph = nullptr;   // not AddRef'ed: the graph owns us
 	wchar_t _name[MAX_FILTER_NAME] = L"";
 	Pin _pin;
+	ProcAmp _procAmp{ this };
+	CameraControl _cameraControl{ this };
 };
 
 } // namespace vcam

@@ -21,6 +21,9 @@ struct VideoFormat
 // All formats in the order apps see them; index 0 is the default.
 const VideoFormat* Formats(size_t* count);
 
+// Fastest rate the camera delivers at this frame width (75 at 640x480, 187 at 320x240).
+uint32_t MaxFps(uint32_t width);
+
 enum class Pixel { YUY2, NV12, I420, RGB24, RGB32 };
 
 // What the streaming thread needs to fill a sample of a given media type.

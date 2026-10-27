@@ -2,6 +2,7 @@
 #define PS3EYE_TESTING 1
 #include "../src/core/convert.h"
 #include "../src/core/ps3eye_camera.h"
+#include "../src/core/rates.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -208,6 +209,96 @@ static void TestRates()
 	CHECK(Camera::SupportedFps(320, 187) == 187, "QVGA 187");
 	CHECK(Camera::SupportedFps(320, 300) == 187, "QVGA capped at 187");
 	CHECK(Camera::SupportedFps(640, 1) == 2, "minimum rate");
+
+	// rates.h (what apps are offered) must list exactly the driver's rates
+	for (uint32_t width : { 640u, 320u })
+	{
+		size_t n = 0;
+		const uint16_t* rates = SupportedRates(width, &n);
+		CHECK(MaxFps(width) == rates[0], "%u: max %u vs %u", width, MaxFps(width), rates[0]);
+		for (uint32_t fps = 1; fps <= 300; fps++)
+		{
+			uint32_t expect = rates[n - 1];
+			for (size_t i = 0; i < n; i++)
+			{
+				if (rates[i] <= fps)
+				{
+					expect = rates[i];
+					break;
+				}
+			}
+			const uint32_t got = Camera::SupportedFps(width, fps);
+			CHECK(got == expect, "%u wide, %u fps: driver picks %u, rates.h says %u", width, fps, got, expect);
+		}
+	}
+}
+
+static void TestAdjust()
+{
+	// one orange-ish pixel in a 3x3 image (sharpening needs neighbours)
+	auto image = [](uint8_t b, uint8_t g, uint8_t r)
+	{
+		std::vector<uint8_t> v(3 * 3 * 4);
+		for (int i = 0; i < 9; i++) { v[i * 4] = b; v[i * 4 + 1] = g; v[i * 4 + 2] = r; v[i * 4 + 3] = 255; }
+		return v;
+	};
+	auto run = [&](ImageAdjust a, uint8_t b = 40, uint8_t g = 120, uint8_t r = 200)
+	{
+		auto v = image(b, g, r);
+		AdjustBGRX(v.data(), 3, 3, 3 * 4, a);
+		return std::vector<int>{ v[16], v[17], v[18], v[19] }; // centre pixel B,G,R,X
+	};
+	auto near = [](int a, int b) { return std::abs(a - b) <= 1; };
+
+	ImageAdjust a;
+	CHECK(a.IsNeutral(), "defaults are neutral");
+	auto p = run(a);
+	CHECK(p[0] == 40 && p[1] == 120 && p[2] == 200, "neutral leaves pixels alone");
+
+	a = {}; a.brightness = 148;
+	p = run(a);
+	CHECK(near(p[0], 60) && near(p[1], 140) && near(p[2], 220) && p[3] == 255, "brightness +20: %d %d %d", p[0], p[1], p[2]);
+
+	a = {}; a.saturation = 0;
+	p = run(a);
+	CHECK(near(p[0], p[1]) && near(p[1], p[2]), "saturation 0 is grey: %d %d %d", p[0], p[1], p[2]);
+	CHECK(near(p[1], (int)(0.299 * 200 + 0.587 * 120 + 0.114 * 40 + 0.5)), "grey keeps the luma: %d", p[1]);
+
+	a = {}; a.contrast = 255; // about x2 around mid grey
+	p = run(a, 100, 100, 100);
+	CHECK(near(p[0], 72) && near(p[2], 72), "contrast x2 pushes 100 to ~72: %d", p[0]);
+
+	a = {}; a.hue = 180; // flips the colour: orange -> blue-ish, same luma
+	p = run(a);
+	CHECK(p[0] > p[2], "hue 180 turns orange blue: B%d R%d", p[0], p[2]);
+
+	a = {}; a.sharpness = 63;
+	p = run(a); // flat image: nothing to sharpen
+	CHECK(p[0] == 40 && p[1] == 120 && p[2] == 200, "sharpening a flat image changes nothing");
+	auto v = image(100, 100, 100);
+	v[16] = v[17] = v[18] = 150; // a bright dot gets brighter
+	AdjustBGRX(v.data(), 3, 3, 3 * 4, a);
+	CHECK(v[16] > 150 && v[12] == 100, "sharpening boosts a dot (%d) and keeps the border (%d)", v[16], v[12]);
+}
+
+static void TestDouble()
+{
+	const int w = 2, h = 2;
+	const uint8_t src[w * h * 4] = { 1, 2, 3, 0, 4, 5, 6, 0, 7, 8, 9, 0, 10, 11, 12, 0 };
+	std::vector<uint8_t> big(w * 2 * h * 2 * 4);
+	DoubleBGRX(src, w, h, w * 4, big.data(), w * 2 * 4);
+	auto at = [&](int x, int y) { return &big[(y * w * 2 + x) * 4]; };
+	CHECK(at(0, 0)[0] == 1 && at(1, 1)[2] == 3 && at(1, 1)[3] == 255, "top-left pixel fills 2x2");
+	CHECK(at(2, 0)[0] == 4 && at(3, 1)[1] == 5, "top-right pixel");
+	CHECK(at(0, 2)[0] == 7 && at(3, 3)[2] == 12, "bottom row");
+
+	// halving a doubled image gives the original back
+	std::vector<uint8_t> back(w * h * 4);
+	HalveBGRX(big.data(), w * 2, h * 2, w * 2 * 4, back.data(), w * 4);
+	bool same = true;
+	for (int i = 0; i < w * h * 4; i++)
+		same &= (i % 4 == 3) ? back[i] == 255 : back[i] == src[i];
+	CHECK(same, "halve(double(x)) == x");
 }
 
 static void WritePpm(const char* path, const std::vector<uint8_t>& bgrx, int w, int h)
@@ -228,6 +319,8 @@ int main(int argc, char** argv)
 	TestRgbAndHalve();
 	TestFrameAssembly();
 	TestRates();
+	TestDouble();
+	TestAdjust();
 
 	std::vector<uint8_t> img(640 * 480 * 4);
 	DrawNoSignal(img.data(), 640, 480, 640 * 4);

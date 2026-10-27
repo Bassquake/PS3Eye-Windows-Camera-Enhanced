@@ -8,7 +8,9 @@
 #include <vector>
 
 #include "../core/convert.h"
+#include "../core/rates.h"
 #include "../source/Config.h"
+#include "../source/Controls.h"
 #include "SharedFrames.h"
 
 namespace vcam {
@@ -634,10 +636,10 @@ STDMETHODIMP Pin::GetStreamCaps(int index, AM_MEDIA_TYPE** ppmt, BYTE* scc)
 	caps->MaxOutputSize = size;
 	caps->OutputGranularityX = 1;
 	caps->OutputGranularityY = 1;
-	caps->MinFrameInterval = 10000000LL / f.fps;
+	caps->MinFrameInterval = 10000000LL / MaxFps(f.width);
 	caps->MaxFrameInterval = 10000000LL; // 1 fps: lower rates are made by skipping frames
 	caps->MinBitsPerSecond = frameBits;
-	caps->MaxBitsPerSecond = frameBits * (LONG)f.fps;
+	caps->MaxBitsPerSecond = frameBits * (LONG)MaxFps(f.width);
 	return S_OK;
 }
 
@@ -717,13 +719,14 @@ void Pin::Stream(StreamFormat format)
 
 	const std::wstring dir = ModuleDir();
 	SharedFrames shared;
-	std::vector<uint8_t> bgrx(kSharedFrameBytes), scratch(kSharedFrameBytes / 4);
+	std::vector<uint8_t> bgrx(kSharedFrameBytes), scratch(kSharedFrameBytes);
+	int srcWidth = (int)kSharedWidth, srcHeight = (int)kSharedHeight;
 	uint64_t seq = 0;
 	bool first = true, launchFailed = false;
 	ULONGLONG lastFrame = GetTickCount64(), lastLaunch = 0, lastPlaceholder = 0;
 	const REFERENCE_TIME interval = 10000000LL / std::max<uint32_t>(1, format.fps);
 	const REFERENCE_TIME begin = SteadyNow();
-	REFERENCE_TIME lastSent = begin - interval;
+	REFERENCE_TIME lastSent = begin - interval, nextDue = begin;
 
 	while (!_quit)
 	{
@@ -731,7 +734,7 @@ void Pin::Stream(StreamFormat format)
 			shared.Open();
 		if (shared.IsOpen())
 		{
-			if (shared.Claim(format.fps) < 0)
+			if (shared.Claim(format.fps, (uint32_t)format.width) < 0)
 				Sleep(10); // all slots taken; frames are still readable
 			shared.Refresh();
 		}
@@ -757,7 +760,7 @@ void Pin::Stream(StreamFormat format)
 		if (_quit)
 			break;
 
-		bool real = false, got = shared.ReadLatest(seq, bgrx.data(), &real);
+		bool real = false, got = shared.ReadLatest(seq, bgrx.data(), srcWidth, srcHeight, &real);
 		tick = GetTickCount64();
 		if (got)
 			lastFrame = tick;
@@ -765,19 +768,27 @@ void Pin::Stream(StreamFormat format)
 		{
 			// server not delivering (not started yet, or gone): keep the app alive
 			lastPlaceholder = tick;
-			ps3eye::DrawNoSignal(bgrx.data(), (int)kSharedWidth, (int)kSharedHeight, (long)kSharedWidth * 4);
+			srcWidth = (int)kSharedWidth;
+			srcHeight = (int)kSharedHeight;
+			ps3eye::DrawNoSignal(bgrx.data(), srcWidth, srcHeight, (long)srcWidth * 4);
 			got = true;
 		}
 		if (!got || !_filter->_running)
 			continue; // paused: live sources don't deliver
 
-		// the camera may run faster than this app asked for (another app wants 60 fps)
+		// the camera may run faster than this app asked for (another app wants 75 fps): send on a
+		// fixed schedule, taking the frame nearest each slot, so e.g. 30 out of 75 averages 30
 		const REFERENCE_TIME now = SteadyNow();
-		if (now - lastSent < interval * 3 / 4)
+		if (now < nextDue - interval / 2)
 			continue;
+		nextDue = now - nextDue > interval ? now + interval : nextDue + interval; // fell behind: resync
+		// smoothed, for IAMVideoControl::GetCurrentActualFrameRate
+		const LONGLONG prev = _actualInterval, gap = std::min<LONGLONG>(now - lastSent, 10000000LL);
+		_actualInterval = first || !prev ? interval : prev + (gap - prev) / 8;
 		lastSent = now;
-		Deliver(bgrx.data(), scratch.data(), format, now - begin, first);
+		Deliver(bgrx.data(), srcWidth, srcHeight, scratch.data(), format, now - begin, first);
 	}
+	_actualInterval = 0;
 
 	shared.Close();
 	Log(L"DirectShow: stream stopped");
@@ -785,7 +796,7 @@ void Pin::Stream(StreamFormat format)
 		CoUninitialize();
 }
 
-void Pin::Deliver(const uint8_t* bgrx, uint8_t* scratch, StreamFormat& format, REFERENCE_TIME fallbackTime, bool& first)
+void Pin::Deliver(const uint8_t* bgrx, int srcWidth, int srcHeight, uint8_t* scratch, StreamFormat& format, REFERENCE_TIME fallbackTime, bool& first)
 {
 	IMediaSample* sample = nullptr;
 	if (FAILED(_allocator->GetBuffer(&sample, nullptr, nullptr, 0)) || !sample)
@@ -811,12 +822,21 @@ void Pin::Deliver(const uint8_t* bgrx, uint8_t* scratch, StreamFormat& format, R
 		return;
 	}
 
+	// the server runs 640x480 or 320x240; scale to what this app asked for
 	const int w = format.width, h = format.height;
 	const uint8_t* src = bgrx;
-	long srcStride = (long)kSharedWidth * 4;
-	if (w != (int)kSharedWidth)
+	long srcStride = (long)srcWidth * 4;
+	if (srcWidth == w * 2 && srcHeight == h * 2)
+		ps3eye::HalveBGRX(bgrx, srcWidth, srcHeight, srcStride, scratch, (long)w * 4);
+	else if (srcWidth * 2 == w && srcHeight * 2 == h)
+		ps3eye::DoubleBGRX(bgrx, srcWidth, srcHeight, srcStride, scratch, (long)w * 4);
+	else if (srcWidth != w || srcHeight != h)
 	{
-		ps3eye::HalveBGRX(bgrx, (int)kSharedWidth, (int)kSharedHeight, srcStride, scratch, (long)w * 4);
+		sample->Release();
+		return;
+	}
+	if (srcWidth != w)
+	{
 		src = scratch;
 		srcStride = (long)w * 4;
 	}
@@ -874,6 +894,14 @@ STDMETHODIMP Filter::QueryInterface(REFIID riid, void** ppv)
 		*ppv = static_cast<IBaseFilter*>(this);
 	else if (riid == IID_IAMFilterMiscFlags)
 		*ppv = static_cast<IAMFilterMiscFlags*>(this);
+	else if (riid == IID_IAMVideoControl)
+		*ppv = static_cast<IAMVideoControl*>(this);
+	else if (riid == IID_ISpecifyPropertyPages)
+		*ppv = static_cast<ISpecifyPropertyPages*>(this);
+	else if (riid == IID_IAMVideoProcAmp)
+		*ppv = static_cast<IAMVideoProcAmp*>(&_procAmp);
+	else if (riid == IID_IAMCameraControl)
+		*ppv = static_cast<IAMCameraControl*>(&_cameraControl);
 	else
 	{
 		*ppv = nullptr;
@@ -1037,6 +1065,173 @@ STDMETHODIMP Filter::QueryVendorInfo(LPWSTR*)
 STDMETHODIMP_(ULONG) Filter::GetMiscFlags()
 {
 	return AM_FILTER_MISC_FLAGS_IS_SOURCE;
+}
+
+// ---- IAMVideoControl ----
+
+STDMETHODIMP Filter::GetCaps(IPin*, long* flags)
+{
+	if (!flags)
+		return E_POINTER;
+	*flags = VideoControlFlag_FlipHorizontal | VideoControlFlag_FlipVertical;
+	return S_OK;
+}
+
+STDMETHODIMP Filter::SetMode(IPin*, long mode)
+{
+	if (mode & ~(VideoControlFlag_FlipHorizontal | VideoControlFlag_FlipVertical))
+		return E_INVALIDARG;
+	return SetFlipMode(mode);
+}
+
+STDMETHODIMP Filter::GetMode(IPin*, long* mode)
+{
+	if (!mode)
+		return E_POINTER;
+	*mode = GetFlipMode();
+	return S_OK;
+}
+
+STDMETHODIMP Filter::GetCurrentActualFrameRate(IPin*, LONGLONG* interval)
+{
+	if (!interval)
+		return E_POINTER;
+	*interval = _pin._actualInterval;
+	return *interval ? S_OK : VFW_E_NOT_CONNECTED;
+}
+
+STDMETHODIMP Filter::GetMaxAvailableFrameRate(IPin*, long, SIZE dimensions, LONGLONG* interval)
+{
+	if (!interval)
+		return E_POINTER;
+	if (!(dimensions.cx == 640 && dimensions.cy == 480) && !(dimensions.cx == 320 && dimensions.cy == 240))
+		return E_INVALIDARG;
+	*interval = 10000000LL / MaxFps((uint32_t)dimensions.cx);
+	return S_OK;
+}
+
+STDMETHODIMP Filter::GetFrameRateList(IPin*, long, SIZE dimensions, long* count, LONGLONG** intervals)
+{
+	if (!count)
+		return E_POINTER;
+	if (!(dimensions.cx == 640 && dimensions.cy == 480) && !(dimensions.cx == 320 && dimensions.cy == 240))
+		return E_INVALIDARG;
+	size_t n = 0;
+	const uint16_t* rates = ps3eye::SupportedRates((uint32_t)dimensions.cx, &n);
+	*count = (long)n;
+	if (!intervals)
+		return S_OK; // just the count
+	*intervals = (LONGLONG*)CoTaskMemAlloc(n * sizeof(LONGLONG));
+	if (!*intervals)
+		return E_OUTOFMEMORY;
+	for (size_t i = 0; i < n; i++)
+		(*intervals)[i] = 10000000LL / rates[i];
+	return S_OK;
+}
+
+// ---- ISpecifyPropertyPages ----
+
+STDMETHODIMP Filter::GetPages(CAUUID* pages)
+{
+	if (!pages)
+		return E_POINTER;
+	pages->pElems = (GUID*)CoTaskMemAlloc(2 * sizeof(GUID));
+	if (!pages->pElems)
+	{
+		pages->cElems = 0;
+		return E_OUTOFMEMORY;
+	}
+	pages->cElems = 2;
+	pages->pElems[0] = CLSID_VideoProcAmpPropertyPage;
+	pages->pElems[1] = CLSID_CameraControlPropertyPage;
+	return S_OK;
+}
+
+// ==== image controls =======================================================================
+
+namespace {
+
+HRESULT ControlRangeOf(ControlGroup group, long prop, long* min, long* max, long* step, long* def, long* caps)
+{
+	if (!min || !max || !step || !def || !caps)
+		return E_POINTER;
+	ControlRange r;
+	if (!GetControlRange(group, prop, r))
+		return E_PROP_ID_UNSUPPORTED;
+	*min = r.min;
+	*max = r.max;
+	*step = r.step;
+	*def = r.def;
+	// VideoProcAmp_Flags_* and CameraControl_Flags_* share values: 1 = auto, 2 = manual
+	*caps = VideoProcAmp_Flags_Manual | (r.canAuto ? VideoProcAmp_Flags_Auto : 0);
+	return S_OK;
+}
+
+HRESULT ControlGetOf(ControlGroup group, long prop, long* value, long* flags)
+{
+	if (!value || !flags)
+		return E_POINTER;
+	bool autoMode = false;
+	if (!GetControl(group, prop, *value, autoMode))
+		return E_PROP_ID_UNSUPPORTED;
+	*flags = autoMode ? VideoProcAmp_Flags_Auto : VideoProcAmp_Flags_Manual;
+	return S_OK;
+}
+
+HRESULT ControlSetOf(ControlGroup group, long prop, long value, long flags)
+{
+	ControlRange r;
+	if (!GetControlRange(group, prop, r))
+		return E_PROP_ID_UNSUPPORTED;
+	const bool autoMode = (flags & VideoProcAmp_Flags_Auto) != 0;
+	if (autoMode && !r.canAuto)
+		return E_INVALIDARG;
+	if (!autoMode && (value < r.min || value > r.max))
+		return E_INVALIDARG;
+	HRESULT hr = SetControl(group, prop, value, autoMode);
+	if (FAILED(hr))
+		Log(L"DirectShow: can't save image setting %ld (0x%08lx); run Install again to allow it", prop, hr);
+	return hr;
+}
+
+} // namespace
+
+STDMETHODIMP ProcAmp::QueryInterface(REFIID riid, void** ppv) { return _filter->QueryInterface(riid, ppv); }
+STDMETHODIMP_(ULONG) ProcAmp::AddRef() { return _filter->AddRef(); }
+STDMETHODIMP_(ULONG) ProcAmp::Release() { return _filter->Release(); }
+
+STDMETHODIMP ProcAmp::GetRange(long prop, long* min, long* max, long* step, long* def, long* caps)
+{
+	return ControlRangeOf(ControlGroup::ProcAmp, prop, min, max, step, def, caps);
+}
+
+STDMETHODIMP ProcAmp::Set(long prop, long value, long flags)
+{
+	return ControlSetOf(ControlGroup::ProcAmp, prop, value, flags);
+}
+
+STDMETHODIMP ProcAmp::Get(long prop, long* value, long* flags)
+{
+	return ControlGetOf(ControlGroup::ProcAmp, prop, value, flags);
+}
+
+STDMETHODIMP CameraControl::QueryInterface(REFIID riid, void** ppv) { return _filter->QueryInterface(riid, ppv); }
+STDMETHODIMP_(ULONG) CameraControl::AddRef() { return _filter->AddRef(); }
+STDMETHODIMP_(ULONG) CameraControl::Release() { return _filter->Release(); }
+
+STDMETHODIMP CameraControl::GetRange(long prop, long* min, long* max, long* step, long* def, long* caps)
+{
+	return ControlRangeOf(ControlGroup::Camera, prop, min, max, step, def, caps);
+}
+
+STDMETHODIMP CameraControl::Set(long prop, long value, long flags)
+{
+	return ControlSetOf(ControlGroup::Camera, prop, value, flags);
+}
+
+STDMETHODIMP CameraControl::Get(long prop, long* value, long* flags)
+{
+	return ControlGetOf(ControlGroup::Camera, prop, value, flags);
 }
 
 } // namespace vcam

@@ -5,6 +5,161 @@
 #include "MFTools.h"
 #include "MediaStream.h"
 #include "MediaSource.h"
+#include "Config.h"
+#include "Controls.h"
+
+namespace {
+
+// ---- image controls as KS properties (what apps' IAMVideoProcAmp / IAMCameraControl and the
+// Windows camera settings page turn into on Windows 11) ----
+
+constexpr HRESULT kMoreData = HRESULT_FROM_WIN32(ERROR_MORE_DATA);
+constexpr HRESULT kNotFound = HRESULT_FROM_WIN32(ERROR_SET_NOT_FOUND);
+
+template <typename T> HRESULT Reply(const T& value, LPVOID data, ULONG dataLength, ULONG* returned)
+{
+	*returned = sizeof(T);
+	if (!data || dataLength < sizeof(T))
+		return kMoreData;
+	memcpy(data, &value, sizeof(T));
+	return S_OK;
+}
+
+// Range (BASICSUPPORT) and default (DEFAULTVALUES) replies for one LONG property.
+HRESULT DescribeRange(const KSPROPERTY* p, const vcam::ControlRange& r, LPVOID data, ULONG dataLength, ULONG* returned)
+{
+	KSPROPERTY_DESCRIPTION desc{};
+	desc.AccessFlags = KSPROPERTY_TYPE_GET | KSPROPERTY_TYPE_SET | KSPROPERTY_TYPE_BASICSUPPORT | KSPROPERTY_TYPE_DEFAULTVALUES;
+	desc.PropTypeSet.Set = KSPROPTYPESETID_General;
+	desc.PropTypeSet.Id = VT_I4;
+	desc.MembersListCount = 1;
+
+	if (p->Flags & KSPROPERTY_TYPE_BASICSUPPORT)
+	{
+		if (data && dataLength == sizeof(ULONG))
+			return Reply<ULONG>(desc.AccessFlags, data, dataLength, returned);
+		struct
+		{
+			KSPROPERTY_DESCRIPTION desc;
+			KSPROPERTY_MEMBERSHEADER header;
+			KSPROPERTY_STEPPING_LONG stepping;
+		} full{};
+		full.desc = desc;
+		full.desc.DescriptionSize = sizeof(full);
+		full.header.MembersFlags = KSPROPERTY_MEMBER_STEPPEDRANGES;
+		full.header.MembersSize = sizeof(KSPROPERTY_STEPPING_LONG);
+		full.header.MembersCount = 1;
+		full.stepping.SteppingDelta = (ULONG)r.step;
+		full.stepping.Bounds.SignedMinimum = r.min;
+		full.stepping.Bounds.SignedMaximum = r.max;
+		if (data && dataLength >= sizeof(KSPROPERTY_DESCRIPTION) && dataLength < sizeof(full))
+			return Reply(full.desc, data, dataLength, returned); // just the header, to learn the size
+		return Reply(full, data, dataLength, returned);
+	}
+
+	struct
+	{
+		KSPROPERTY_DESCRIPTION desc;
+		KSPROPERTY_MEMBERSHEADER header;
+		LONG value;
+	} def{};
+	def.desc = desc;
+	def.desc.DescriptionSize = sizeof(def);
+	def.header.MembersFlags = KSPROPERTY_MEMBER_VALUES;
+	def.header.MembersSize = sizeof(LONG);
+	def.header.MembersCount = 1;
+	def.header.Flags = KSPROPERTY_MEMBER_FLAG_DEFAULT;
+	def.value = r.def;
+	return Reply(def, data, dataLength, returned);
+}
+
+// KSPROPERTY_VIDEOPROCAMP_S and KSPROPERTY_CAMERACONTROL_S have the same layout, and their
+// flag values agree (1 = auto, 2 = manual).
+HRESULT ControlProperty(vcam::ControlGroup group, const KSPROPERTY* p, ULONG length, LPVOID data, ULONG dataLength, ULONG* returned)
+{
+	static_assert(sizeof(KSPROPERTY_VIDEOPROCAMP_S) == sizeof(KSPROPERTY_CAMERACONTROL_S));
+	vcam::ControlRange r;
+	if (!vcam::GetControlRange(group, (long)p->Id, r))
+		return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+	if (p->Flags & (KSPROPERTY_TYPE_BASICSUPPORT | KSPROPERTY_TYPE_DEFAULTVALUES))
+		return DescribeRange(p, r, data, dataLength, returned);
+
+	if (p->Flags & KSPROPERTY_TYPE_GET)
+	{
+		KSPROPERTY_VIDEOPROCAMP_S out{};
+		out.Property = *p;
+		long value = 0;
+		bool autoMode = false;
+		vcam::GetControl(group, (long)p->Id, value, autoMode);
+		out.Value = value;
+		out.Flags = autoMode ? KSPROPERTY_VIDEOPROCAMP_FLAGS_AUTO : KSPROPERTY_VIDEOPROCAMP_FLAGS_MANUAL;
+		out.Capabilities = KSPROPERTY_VIDEOPROCAMP_FLAGS_MANUAL | (r.canAuto ? KSPROPERTY_VIDEOPROCAMP_FLAGS_AUTO : 0);
+		return Reply(out, data, dataLength, returned);
+	}
+
+	if (p->Flags & KSPROPERTY_TYPE_SET)
+	{
+		// the new value comes in the data buffer (some callers put it in the property buffer)
+		const KSPROPERTY_VIDEOPROCAMP_S* in = nullptr;
+		if (data && dataLength >= sizeof(KSPROPERTY_VIDEOPROCAMP_S))
+			in = (const KSPROPERTY_VIDEOPROCAMP_S*)data;
+		else if (length >= sizeof(KSPROPERTY_VIDEOPROCAMP_S))
+			in = (const KSPROPERTY_VIDEOPROCAMP_S*)p;
+		if (!in)
+			return E_INVALIDARG;
+		*returned = 0;
+		const bool autoMode = (in->Flags & KSPROPERTY_VIDEOPROCAMP_FLAGS_AUTO) != 0;
+		if (autoMode && !r.canAuto)
+			return E_INVALIDARG;
+		HRESULT hr = vcam::SetControl(group, (long)p->Id, in->Value, autoMode);
+		if (FAILED(hr))
+			vcam::Log(L"Can't save image setting %lu (0x%08lx); run Install again to allow it", p->Id, hr);
+		return hr;
+	}
+	return E_INVALIDARG;
+}
+
+// Mirror/flip: KSPROPERTY_VIDEOCONTROL_CAPS and _MODE.
+HRESULT VideoControlProperty(const KSPROPERTY* p, ULONG length, LPVOID data, ULONG dataLength, ULONG* returned)
+{
+	constexpr LONG kFlips = KS_VideoControlFlag_FlipHorizontal | KS_VideoControlFlag_FlipVertical;
+	if (p->Id == KSPROPERTY_VIDEOCONTROL_CAPS && (p->Flags & KSPROPERTY_TYPE_GET))
+	{
+		KSPROPERTY_VIDEOCONTROL_CAPS_S out{};
+		out.Property = *p;
+		if (length >= sizeof(out))
+			out.StreamIndex = ((const KSPROPERTY_VIDEOCONTROL_CAPS_S*)p)->StreamIndex;
+		out.VideoControlCaps = kFlips;
+		return Reply(out, data, dataLength, returned);
+	}
+	if (p->Id == KSPROPERTY_VIDEOCONTROL_MODE)
+	{
+		if (p->Flags & KSPROPERTY_TYPE_GET)
+		{
+			KSPROPERTY_VIDEOCONTROL_MODE_S out{};
+			out.Property = *p;
+			if (length >= sizeof(out))
+				out.StreamIndex = ((const KSPROPERTY_VIDEOCONTROL_MODE_S*)p)->StreamIndex;
+			out.Mode = vcam::GetFlipMode();
+			return Reply(out, data, dataLength, returned);
+		}
+		if (p->Flags & KSPROPERTY_TYPE_SET)
+		{
+			const KSPROPERTY_VIDEOCONTROL_MODE_S* in = nullptr;
+			if (data && dataLength >= sizeof(KSPROPERTY_VIDEOCONTROL_MODE_S))
+				in = (const KSPROPERTY_VIDEOCONTROL_MODE_S*)data;
+			else if (length >= sizeof(KSPROPERTY_VIDEOCONTROL_MODE_S))
+				in = (const KSPROPERTY_VIDEOCONTROL_MODE_S*)p;
+			if (!in || (in->Mode & ~kFlips))
+				return E_INVALIDARG;
+			*returned = 0;
+			return vcam::SetFlipMode(in->Mode);
+		}
+	}
+	return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+}
+
+} // namespace
 
 HRESULT MediaSource::Initialize(IMFAttributes* attributes)
 {
@@ -350,15 +505,19 @@ STDMETHODIMP_(NTSTATUS) MediaSource::KsProperty(PKSPROPERTY property, ULONG leng
 	winrt::slim_lock_guard lock(_lock);
 
 	WINTRACE(L"MediaSource::KsProperty prop:%s", PKSIDENTIFIER_ToString(property, length).c_str());
+	RETURN_HR_IF(E_INVALIDARG, length < sizeof(KSPROPERTY));
+	*bytesReturned = 0;
 
-	// right now, we don't expose any property, but this is where we'll typically be asked for
-	// 
-	// KSPROPSETID_Pin, KSPROPSETID_Topology, PROPSETID_VIDCAP_CAMERACONTROL, PROPSETID_VIDCAP_VIDEOPROCAMP
-	// PROPSETID_VIDCAP_CAMERACONTROL_REGION_OF_INTEREST, KSPROPERTYSETID_PerFrameSettingControl, KSPROPERTYSETID_ExtendedCameraControl
-	// 
-	// etc
+	// image controls; everything else (KSPROPSETID_Pin, KSPROPSETID_Topology, region of interest,
+	// per-frame settings, extended camera controls) isn't something the PS3 Eye has
+	if (property->Set == PROPSETID_VIDCAP_VIDEOPROCAMP)
+		return ControlProperty(vcam::ControlGroup::ProcAmp, property, length, data, dataLength, bytesReturned);
+	if (property->Set == PROPSETID_VIDCAP_CAMERACONTROL)
+		return ControlProperty(vcam::ControlGroup::Camera, property, length, data, dataLength, bytesReturned);
+	if (property->Set == PROPSETID_VIDCAP_VIDEOCONTROL)
+		return VideoControlProperty(property, length, data, dataLength, bytesReturned);
 
-	return HRESULT_FROM_WIN32(ERROR_SET_NOT_FOUND);
+	return kNotFound;
 }
 
 STDMETHODIMP_(NTSTATUS) MediaSource::KsMethod(PKSMETHOD method, ULONG length, LPVOID data, ULONG dataLength, ULONG* bytesReturned)

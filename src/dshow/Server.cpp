@@ -26,6 +26,7 @@ int Run(vcam::SharedFrames& shared)
 	ps3eye::Camera camera;
 	ps3eye::Status lastStatus = ps3eye::Status::Ok; // only log a failure when it changes
 	vcam::Config config = vcam::LoadConfig();
+	ps3eye::ImageAdjust adjust = vcam::ImageAdjustFor(config.camera);
 	std::vector<uint8_t> bayer;
 
 	const auto started = Clock::now();
@@ -33,7 +34,7 @@ int Run(vcam::SharedFrames& shared)
 	auto lastAttempt = Clock::now() - seconds(10);
 	auto lastFrame = Clock::now();
 	auto lastPlaceholder = Clock::now() - seconds(10);
-	uint32_t fps = 0;
+	uint32_t width = vcam::kSharedWidth, height = vcam::kSharedHeight, fps = 0;
 	uint64_t frames = 0;
 	auto statsStart = Clock::now();
 
@@ -51,8 +52,8 @@ int Run(vcam::SharedFrames& shared)
 
 	for (;;)
 	{
-		int readers = 0;
-		const uint32_t wanted = shared.WantedFps(GetTickCount64(), &readers);
+		const vcam::WantedMode wanted = shared.Wanted(GetTickCount64());
+		const int readers = wanted.readers;
 		if (readers > 0)
 		{
 			lastReader = Clock::now();
@@ -71,13 +72,15 @@ int Run(vcam::SharedFrames& shared)
 			continue;
 		}
 
-		// an app asking for a faster rate restarts the sensor at that rate
-		const uint32_t rate = ps3eye::Camera::SupportedFps(vcam::kSharedWidth, std::max<uint32_t>(wanted, 1));
-		if (rate != fps)
+		// an app asking for a faster rate (or 320x240 beyond 640x480's limit) restarts the sensor
+		const uint32_t rate = ps3eye::Camera::SupportedFps(wanted.width, std::max<uint32_t>(wanted.fps, 1));
+		if (rate != fps || wanted.width != width)
 		{
 			if (camera.IsStreaming())
 				camera.Stop();
 			fps = rate;
+			width = wanted.width;
+			height = wanted.height;
 			lastAttempt = Clock::now() - seconds(10);
 		}
 
@@ -93,7 +96,7 @@ int Run(vcam::SharedFrames& shared)
 			if (Clock::now() - lastAttempt >= seconds(1))
 			{
 				lastAttempt = Clock::now();
-				ps3eye::Status st = camera.Start(vcam::kSharedWidth, vcam::kSharedHeight, fps, config.camera, config.deviceIndex);
+				ps3eye::Status st = camera.Start(width, height, fps, config.camera, config.deviceIndex);
 				if (st == ps3eye::Status::Ok)
 				{
 					vcam::Log(L"Camera streaming %ux%u @ %u fps for %d app(s)", camera.Width(), camera.Height(), camera.Fps(), readers);
@@ -113,8 +116,10 @@ int Run(vcam::SharedFrames& shared)
 		{
 			if (camera.WaitFrame(bayer, milliseconds(100)))
 			{
-				ps3eye::BayerToBGRX(bayer.data(), (int)vcam::kSharedWidth, (int)vcam::kSharedHeight, shared.WriteBuffer(), (long)vcam::kSharedWidth * 4);
-				shared.Publish(true);
+				const uint32_t w = camera.Width(), h = camera.Height();
+				ps3eye::BayerToBGRX(bayer.data(), (int)w, (int)h, shared.WriteBuffer(), (long)w * 4);
+				ps3eye::AdjustBGRX(shared.WriteBuffer(), (int)w, (int)h, (long)w * 4, adjust);
+				shared.Publish(true, w, h);
 				lastFrame = Clock::now();
 
 				frames++;
@@ -139,7 +144,7 @@ int Run(vcam::SharedFrames& shared)
 			{
 				lastPlaceholder = Clock::now();
 				ps3eye::DrawNoSignal(shared.WriteBuffer(), (int)vcam::kSharedWidth, (int)vcam::kSharedHeight, (long)vcam::kSharedWidth * 4);
-				shared.Publish(false);
+				shared.Publish(false, vcam::kSharedWidth, vcam::kSharedHeight);
 			}
 			std::this_thread::sleep_for(milliseconds(20));
 		}
@@ -154,6 +159,7 @@ int Run(vcam::SharedFrames& shared)
 			else
 				camera.Apply(next.camera);
 			config = next;
+			adjust = vcam::ImageAdjustFor(config.camera);
 			watchSettings();
 		}
 	}

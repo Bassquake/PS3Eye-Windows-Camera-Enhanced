@@ -1,5 +1,5 @@
 ; Installer wizard for PS3 Eye Camera. Built by build.bat with Inno Setup 6 or 7:
-;   ISCC.exe /DAppVersion=1.0.0 /DDistDir=..\dist installer\PS3EyeCamera.iss
+;   ISCC.exe /DAppVersion=1.1.0 /DDistDir=..\dist installer\PS3EyeCamera.iss
 ;
 ; The wizard stages the files in {app}\installer and runs "PS3EyeSetup.exe install" from there.
 ; That tool copies them into {app} (handling a DLL still loaded by the Windows camera service),
@@ -8,7 +8,7 @@
 ; fed by PS3EyeServer.exe.
 
 #ifndef AppVersion
-  #define AppVersion "1.0.0"
+  #define AppVersion "1.1.0"
 #endif
 #ifndef DistDir
   #define DistDir "..\dist"

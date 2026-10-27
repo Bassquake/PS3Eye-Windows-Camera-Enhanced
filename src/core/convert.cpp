@@ -1,8 +1,10 @@
 #include "convert.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 
 namespace ps3eye {
 
@@ -218,6 +220,96 @@ void HalveBGRX(const uint8_t* src, int w, int h, long srcStride, uint8_t* dst, l
 			s0 += 8;
 			s1 += 8;
 			d += 4;
+		}
+	}
+}
+
+void DoubleBGRX(const uint8_t* src, int w, int h, long srcStride, uint8_t* dst, long dstStride)
+{
+	for (int y = 0; y < h; y++)
+	{
+		const uint8_t* s = src + (long)y * srcStride;
+		uint8_t* d0 = dst + (long)(y * 2) * dstStride;
+		uint8_t* d1 = d0 + dstStride;
+		for (int x = 0; x < w; x++)
+		{
+			for (int c = 0; c < 3; c++)
+				d0[c] = d0[4 + c] = d1[c] = d1[4 + c] = s[c];
+			d0[3] = d0[7] = d1[3] = d1[7] = 0xFF;
+			s += 4;
+			d0 += 8;
+			d1 += 8;
+		}
+	}
+}
+
+bool ImageAdjust::IsNeutral() const
+{
+	return brightness == 128 && contrast == 128 && saturation == 128 && hue % 360 == 0 && sharpness == 0;
+}
+
+void AdjustBGRX(uint8_t* img, int w, int h, long stride, const ImageAdjust& a)
+{
+	// Brightness, contrast, saturation and hue are all linear in R,G,B, so together they're one
+	// colour matrix plus an offset: luma Y = .299R + .587G + .114B gets contrast and brightness,
+	// the colour differences U = B - Y, V = R - Y get rotated (hue) and scaled (saturation).
+	if (a.brightness != 128 || a.contrast != 128 || a.saturation != 128 || a.hue % 360 != 0)
+	{
+		const double c = a.contrast / 128.0, s = a.saturation / 128.0, b = a.brightness - 128;
+		const double rad = a.hue * 3.14159265358979323846 / 180.0, cs = std::cos(rad) * s, sn = std::sin(rad) * s;
+		auto apply = [&](double r, double g, double bl, double out[3])
+		{
+			const double y = 0.299 * r + 0.587 * g + 0.114 * bl, u = bl - y, v = r - y;
+			const double y2 = (y - 128) * c + 128 + b, u2 = u * cs - v * sn, v2 = u * sn + v * cs;
+			out[0] = y2 + u2;                                   // B
+			out[1] = y2 - (0.299 * v2 + 0.114 * u2) / 0.587;    // G
+			out[2] = y2 + v2;                                   // R
+		};
+		double off[3], col[3][3];
+		apply(0, 0, 0, off);
+		apply(0, 0, 1, col[0]); // unit blue
+		apply(0, 1, 0, col[1]); // unit green
+		apply(1, 0, 0, col[2]); // unit red
+		int m[3][3], o[3];   // 10-bit fixed point: out[i] = sum m[i][j] * in[j] (in = B,G,R)
+		for (int i = 0; i < 3; i++)
+		{
+			o[i] = (int)std::lround(off[i] * 1024) + 512;
+			for (int j = 0; j < 3; j++)
+				m[i][j] = (int)std::lround((col[j][i] - off[i]) * 1024);
+		}
+		for (int y = 0; y < h; y++)
+		{
+			uint8_t* p = img + (long)y * stride;
+			for (int x = 0; x < w; x++, p += 4)
+			{
+				const int B = p[0], G = p[1], R = p[2];
+				for (int i = 0; i < 3; i++)
+					p[i] = (uint8_t)std::clamp((m[i][0] * B + m[i][1] * G + m[i][2] * R + o[i]) >> 10, 0, 255);
+			}
+		}
+	}
+
+	// sharpening: each pixel minus a share of its four neighbours (a small unsharp mask)
+	if (a.sharpness > 0 && w > 2 && h > 2)
+	{
+		const int k = std::clamp(a.sharpness, 0, 63) * 4; // up to x1 of the edge signal (/256 per neighbour)
+		const size_t row = (size_t)w * 4;
+		std::vector<uint8_t> above(img, img + row), cur(row);
+		for (int y = 1; y + 1 < h; y++)
+		{
+			uint8_t* p = img + (long)y * stride;
+			const uint8_t* below = p + stride;
+			std::memcpy(cur.data(), p, row);
+			for (int x = 1; x + 1 < w; x++)
+			{
+				for (int c = 0; c < 3; c++)
+				{
+					const int i = x * 4 + c, centre = cur[i];
+					const int edge = 4 * centre - above[i] - below[i] - cur[i - 4] - cur[i + 4];
+					p[i] = (uint8_t)std::clamp(centre + ((edge * k) >> 8), 0, 255);
+				}
+			}
+			above.swap(cur);
 		}
 	}
 }

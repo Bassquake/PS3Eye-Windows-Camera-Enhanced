@@ -3,6 +3,7 @@
 
 #include <windows.h>
 #include <string>
+#include "../core/convert.h"
 #include "../core/ps3eye_camera.h"
 
 namespace vcam {
@@ -28,6 +29,9 @@ struct ConfigItem
 const ConfigItem* ConfigItems(size_t* count);
 
 Config LoadConfig();
+
+// The settings done on the PC after demosaicing (brightness, contrast, saturation, hue, sharpness).
+ps3eye::ImageAdjust ImageAdjustFor(const ps3eye::Settings& s);
 DWORD ReadConfigValue(const wchar_t* name, DWORD fallback, bool* present = nullptr);
 LSTATUS WriteConfigValue(const wchar_t* name, DWORD value);   // needs admin
 LSTATUS DeleteConfigValue(const wchar_t* name);               // needs admin

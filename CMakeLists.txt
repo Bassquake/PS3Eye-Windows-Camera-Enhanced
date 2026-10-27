@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.21)
 # Static CRT on Windows so the DLLs load inside the Windows camera service and any app with no extra runtimes.
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
-project(PS3EyeVCam VERSION 1.0.0 LANGUAGES CXX)
+project(PS3EyeVCam VERSION 1.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -36,6 +36,7 @@ if(WIN32)
         src/dshow/MediaTypes.cpp
         src/dshow/SharedFrames.cpp
         src/source/Config.cpp
+        src/source/Controls.cpp
         src/dshow/PS3EyeDShow.def)
     set_target_properties(PS3EyeDShow PROPERTIES OUTPUT_NAME ${PS3EYE_DSHOW_NAME})
     target_link_libraries(PS3EyeDShow PRIVATE ps3eye_convert strmiids ole32 oleaut32 advapi32 shell32)
@@ -82,6 +83,7 @@ if(WIN32)
     add_library(PS3EyeVCam SHARED
         src/source/Activator.cpp
         src/source/Config.cpp
+        src/source/Controls.cpp
         src/source/EnumNames.cpp
         src/source/MediaSource.cpp
         src/source/MediaStream.cpp

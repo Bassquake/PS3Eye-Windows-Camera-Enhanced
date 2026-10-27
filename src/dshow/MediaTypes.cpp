@@ -1,5 +1,7 @@
 #include "MediaTypes.h"
 
+#include "../core/rates.h"
+
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
@@ -24,31 +26,32 @@ const GUID kYUY2 = FourCCGuid(FourCC('Y', 'U', 'Y', '2'));
 const GUID kNV12 = FourCCGuid(FourCC('N', 'V', '1', '2'));
 const GUID kI420 = FourCCGuid(FourCC('I', '4', '2', '0'));
 
+#define PS3EYE_FORMAT(subtype, compression, bits) \
+	{ subtype, compression, bits, 640, 480, 30 }, { subtype, compression, bits, 640, 480, 60 }, \
+	{ subtype, compression, bits, 640, 480, 75 }
+
+#define PS3EYE_FORMAT_QVGA(subtype, compression, bits) \
+	{ subtype, compression, bits, 320, 240, 30 }, { subtype, compression, bits, 320, 240, 60 }, \
+	{ subtype, compression, bits, 320, 240, 125 }, { subtype, compression, bits, 320, 240, 187 }
+
 // YUY2 first: every DirectShow app handles it. Chrome, Zoom and Teams also take NV12/I420.
+// Each entry's rate is just a common pick: apps can ask for any rate up to the size's maximum
+// (75 fps at 640x480, 187 at 320x240), see GetStreamCaps and IAMVideoControl.
 const VideoFormat kFormats[] = {
-	{ &kYUY2, FourCC('Y', 'U', 'Y', '2'), 16, 640, 480, 30 },
-	{ &kYUY2, FourCC('Y', 'U', 'Y', '2'), 16, 640, 480, 60 },
-	{ &kNV12, FourCC('N', 'V', '1', '2'), 12, 640, 480, 30 },
-	{ &kNV12, FourCC('N', 'V', '1', '2'), 12, 640, 480, 60 },
-	{ &kI420, FourCC('I', '4', '2', '0'), 12, 640, 480, 30 },
-	{ &kI420, FourCC('I', '4', '2', '0'), 12, 640, 480, 60 },
-	{ &MEDIASUBTYPE_RGB24, BI_RGB, 24, 640, 480, 30 },
-	{ &MEDIASUBTYPE_RGB24, BI_RGB, 24, 640, 480, 60 },
-	{ &MEDIASUBTYPE_RGB32, BI_RGB, 32, 640, 480, 30 },
-	{ &MEDIASUBTYPE_RGB32, BI_RGB, 32, 640, 480, 60 },
-	{ &kYUY2, FourCC('Y', 'U', 'Y', '2'), 16, 320, 240, 30 },
-	{ &kYUY2, FourCC('Y', 'U', 'Y', '2'), 16, 320, 240, 60 },
-	{ &kNV12, FourCC('N', 'V', '1', '2'), 12, 320, 240, 30 },
-	{ &kNV12, FourCC('N', 'V', '1', '2'), 12, 320, 240, 60 },
-	{ &kI420, FourCC('I', '4', '2', '0'), 12, 320, 240, 30 },
-	{ &kI420, FourCC('I', '4', '2', '0'), 12, 320, 240, 60 },
-	{ &MEDIASUBTYPE_RGB24, BI_RGB, 24, 320, 240, 30 },
-	{ &MEDIASUBTYPE_RGB24, BI_RGB, 24, 320, 240, 60 },
-	{ &MEDIASUBTYPE_RGB32, BI_RGB, 32, 320, 240, 30 },
-	{ &MEDIASUBTYPE_RGB32, BI_RGB, 32, 320, 240, 60 },
+	PS3EYE_FORMAT(&kYUY2, FourCC('Y', 'U', 'Y', '2'), 16),
+	PS3EYE_FORMAT(&kNV12, FourCC('N', 'V', '1', '2'), 12),
+	PS3EYE_FORMAT(&kI420, FourCC('I', '4', '2', '0'), 12),
+	PS3EYE_FORMAT(&MEDIASUBTYPE_RGB24, BI_RGB, 24),
+	PS3EYE_FORMAT(&MEDIASUBTYPE_RGB32, BI_RGB, 32),
+	PS3EYE_FORMAT_QVGA(&kYUY2, FourCC('Y', 'U', 'Y', '2'), 16),
+	PS3EYE_FORMAT_QVGA(&kNV12, FourCC('N', 'V', '1', '2'), 12),
+	PS3EYE_FORMAT_QVGA(&kI420, FourCC('I', '4', '2', '0'), 12),
+	PS3EYE_FORMAT_QVGA(&MEDIASUBTYPE_RGB24, BI_RGB, 24),
+	PS3EYE_FORMAT_QVGA(&MEDIASUBTYPE_RGB32, BI_RGB, 32),
 };
 
-constexpr uint32_t kMaxFps = 60;
+#undef PS3EYE_FORMAT
+#undef PS3EYE_FORMAT_QVGA
 
 bool IsPlanar(const GUID& subtype) { return subtype == kNV12 || subtype == kI420; }
 bool IsRgb(const GUID& subtype) { return subtype == MEDIASUBTYPE_RGB24 || subtype == MEDIASUBTYPE_RGB32; }
@@ -73,12 +76,12 @@ DWORD FrameBytes(const VideoFormat& f, long stride, long height)
 	return IsPlanar(*f.subtype) ? (DWORD)(stride * height * 3 / 2) : (DWORD)(stride * height);
 }
 
-uint32_t FpsFrom(REFERENCE_TIME avg)
+uint32_t FpsFrom(REFERENCE_TIME avg, uint32_t width)
 {
 	if (avg <= 0)
 		return 30;
 	uint32_t fps = (uint32_t)((10000000LL + avg / 2) / avg);
-	return std::clamp<uint32_t>(fps, 1, kMaxFps);
+	return std::clamp<uint32_t>(fps, 1, MaxFps(width));
 }
 
 } // namespace
@@ -87,6 +90,11 @@ const VideoFormat* Formats(size_t* count)
 {
 	*count = std::size(kFormats);
 	return kFormats;
+}
+
+uint32_t MaxFps(uint32_t width)
+{
+	return ps3eye::MaxFps(width);
 }
 
 bool DescribeFormat(const AM_MEDIA_TYPE& mt, StreamFormat& out)
@@ -118,7 +126,7 @@ bool DescribeFormat(const AM_MEDIA_TYPE& mt, StreamFormat& out)
 		: mt.subtype == MEDIASUBTYPE_RGB24 ? Pixel::RGB24 : Pixel::RGB32;
 	out.width = (int)width;
 	out.height = (int)height;
-	out.fps = FpsFrom(vih->AvgTimePerFrame);
+	out.fps = FpsFrom(vih->AvgTimePerFrame, f->width);
 	out.stride = RowBytes(*f, std::abs(bih.biWidth));
 	out.size = FrameBytes(*f, out.stride, height);
 	out.bottomUp = IsRgb(mt.subtype) && bih.biHeight > 0;
@@ -133,7 +141,7 @@ HRESULT BuildMediaType(const VideoFormat& f, uint32_t fps, AM_MEDIA_TYPE& mt)
 		return E_OUTOFMEMORY;
 	memset(vih, 0, sizeof(*vih));
 
-	fps = std::clamp<uint32_t>(fps, 1, kMaxFps);
+	fps = std::clamp<uint32_t>(fps, 1, MaxFps(f.width));
 	const long stride = RowBytes(f, (long)f.width);
 	const DWORD size = FrameBytes(f, stride, (long)f.height);
 	vih->AvgTimePerFrame = 10000000LL / fps;

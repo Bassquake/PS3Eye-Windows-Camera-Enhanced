@@ -20,10 +20,11 @@ const ConfigItem kItems[] = {
 	{ L"AutoWhiteBalance", 0, 1, L"1 = automatic white balance (recommended), 0 = use Red/Green/BlueBalance" },
 	{ L"Gain", 0, 63, L"sensor gain when AutoGain=0" },
 	{ L"Exposure", 0, 255, L"exposure when AutoGain=0" },
-	{ L"Brightness", 0, 255, L"" },
-	{ L"Contrast", 0, 255, L"" },
-	{ L"Sharpness", 0, 63, L"" },
-	{ L"Hue", 0, 255, L"" },
+	{ L"Brightness", 0, 255, L"128 = normal" },
+	{ L"Contrast", 0, 255, L"128 = normal" },
+	{ L"Saturation", 0, 255, L"128 = normal, 0 = black and white" },
+	{ L"Hue", 0, 359, L"colour shift in degrees, 0 = normal" },
+	{ L"Sharpness", 0, 63, L"0 = off" },
 	{ L"RedBalance", 0, 255, L"when AutoWhiteBalance=0" },
 	{ L"GreenBalance", 0, 255, L"when AutoWhiteBalance=0" },
 	{ L"BlueBalance", 0, 255, L"when AutoWhiteBalance=0" },
@@ -90,19 +91,31 @@ Config LoadConfig()
 	ps3eye::Settings& s = c.camera;
 	s.autoGain = Clamped<int>(L"AutoGain", s.autoGain) != 0;
 	s.autoWhiteBalance = Clamped<int>(L"AutoWhiteBalance", s.autoWhiteBalance) != 0;
-	s.gain = Clamped<uint8_t>(L"Gain", s.gain);
-	s.exposure = Clamped<uint8_t>(L"Exposure", s.exposure);
-	s.brightness = Clamped<uint8_t>(L"Brightness", s.brightness);
-	s.contrast = Clamped<uint8_t>(L"Contrast", s.contrast);
-	s.sharpness = Clamped<uint8_t>(L"Sharpness", s.sharpness);
-	s.hue = Clamped<uint8_t>(L"Hue", s.hue);
-	s.redBalance = Clamped<uint8_t>(L"RedBalance", s.redBalance);
-	s.greenBalance = Clamped<uint8_t>(L"GreenBalance", s.greenBalance);
-	s.blueBalance = Clamped<uint8_t>(L"BlueBalance", s.blueBalance);
+	s.gain = Clamped<int>(L"Gain", s.gain);
+	s.exposure = Clamped<int>(L"Exposure", s.exposure);
+	s.brightness = Clamped<int>(L"Brightness", s.brightness);
+	s.contrast = Clamped<int>(L"Contrast", s.contrast);
+	s.saturation = Clamped<int>(L"Saturation", s.saturation);
+	s.hue = Clamped<int>(L"Hue", s.hue);
+	s.sharpness = Clamped<int>(L"Sharpness", s.sharpness);
+	s.redBalance = Clamped<int>(L"RedBalance", s.redBalance);
+	s.greenBalance = Clamped<int>(L"GreenBalance", s.greenBalance);
+	s.blueBalance = Clamped<int>(L"BlueBalance", s.blueBalance);
 	s.flipH = Clamped<int>(L"FlipHorizontal", s.flipH) != 0;
 	s.flipV = Clamped<int>(L"FlipVertical", s.flipV) != 0;
 	c.deviceIndex = Clamped<int>(L"DeviceIndex", 0);
 	return c;
+}
+
+ps3eye::ImageAdjust ImageAdjustFor(const ps3eye::Settings& s)
+{
+	ps3eye::ImageAdjust a;
+	a.brightness = s.brightness;
+	a.contrast = s.contrast;
+	a.saturation = s.saturation;
+	a.hue = s.hue;
+	a.sharpness = s.sharpness;
+	return a;
 }
 
 std::wstring DataFolder()
