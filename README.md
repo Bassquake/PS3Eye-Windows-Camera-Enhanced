@@ -63,6 +63,8 @@ Log file: `C:\ProgramData\PS3EyeVCam\vcam.log`
 
 Double-click `build.bat`. It installs the free C++ build tools and Inno Setup if needed, then builds the installer and portable zip into `dist\`. Change the version at the top of `build.bat`.
 
+The program icon and the installer wizard pictures are made from `icon.png`. After changing it, run `python tools/make_artwork.py` (needs Python with Pillow: `pip install pillow`), then `build.bat`.
+
 ## How it works
 
 Windows 11:

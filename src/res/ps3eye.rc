@@ -1,4 +1,3 @@
 // Program icon for PS3EyeSetup.exe and PS3EyeServer.exe: Explorer, the Start menu, the taskbar
-// and Apps & features show it. ps3eye.ico is made from icon.png (the camera cut out of its
-// white background, 16 to 256 px).
+// and Apps & features show it. ps3eye.ico is made from icon.png by tools/make_artwork.py.
 1 ICON "ps3eye.ico"
