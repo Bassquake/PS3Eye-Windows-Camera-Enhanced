@@ -6,6 +6,10 @@
 ; registers the camera and sets up the USB driver. It picks the camera type itself: the Windows 11
 ; virtual camera (PS3EyeVCam.dll), or on Windows 10 the DirectShow filters (PS3EyeDShow64/32.dll)
 ; fed by PS3EyeServer.exe.
+;
+; One installer for x64, ARM64 and x86 PCs: it installs dist\x64, or on Windows on ARM dist\arm64
+; (the camera service there is native ARM64 and can't load x64 DLLs), or on 32-bit Windows 10
+; dist\x86.
 
 #ifndef AppVersion
   #define AppVersion "1.1.0"
@@ -26,8 +30,8 @@ DisableProgramGroupPage=yes
 DisableWelcomePage=no
 LicenseFile=..\LICENSE
 PrivilegesRequired=admin
-ArchitecturesAllowed=x64compatible
-ArchitecturesInstallIn64BitMode=x64compatible
+ArchitecturesAllowed=x86compatible
+ArchitecturesInstallIn64BitMode=x64compatible or arm64
 MinVersion=10.0.10240
 OutputDir={#DistDir}
 OutputBaseFilename=PS3EyeCamera-Setup-{#AppVersion}
@@ -49,11 +53,18 @@ WelcomeLabel2=This will install the PS3 Eye Camera driver, so your PlayStation 3
 WindowsVersionNotSupported=PS3 Eye Camera needs Windows 10 or 11.
 
 [Files]
-Source: "{#DistDir}\PS3EyeSetup.exe"; DestDir: "{app}\installer"; Flags: ignoreversion
-Source: "{#DistDir}\PS3EyeVCam.dll"; DestDir: "{app}\installer"; Flags: ignoreversion
-Source: "{#DistDir}\PS3EyeServer.exe"; DestDir: "{app}\installer"; Flags: ignoreversion
-Source: "{#DistDir}\PS3EyeDShow64.dll"; DestDir: "{app}\installer"; Flags: ignoreversion
-Source: "{#DistDir}\PS3EyeDShow32.dll"; DestDir: "{app}\installer"; Flags: ignoreversion
+Source: "{#DistDir}\x64\PS3EyeSetup.exe"; DestDir: "{app}\installer"; Flags: ignoreversion; Check: Is64BitInstallMode and not IsArm64
+Source: "{#DistDir}\x64\PS3EyeVCam.dll"; DestDir: "{app}\installer"; Flags: ignoreversion; Check: Is64BitInstallMode and not IsArm64
+Source: "{#DistDir}\x64\PS3EyeServer.exe"; DestDir: "{app}\installer"; Flags: ignoreversion; Check: Is64BitInstallMode and not IsArm64
+Source: "{#DistDir}\x64\PS3EyeDShow64.dll"; DestDir: "{app}\installer"; Flags: ignoreversion; Check: Is64BitInstallMode and not IsArm64
+Source: "{#DistDir}\arm64\PS3EyeSetup.exe"; DestDir: "{app}\installer"; Flags: ignoreversion; Check: IsArm64
+Source: "{#DistDir}\arm64\PS3EyeVCam.dll"; DestDir: "{app}\installer"; Flags: ignoreversion; Check: IsArm64
+Source: "{#DistDir}\arm64\PS3EyeServer.exe"; DestDir: "{app}\installer"; Flags: ignoreversion; Check: IsArm64
+Source: "{#DistDir}\arm64\PS3EyeDShow64.dll"; DestDir: "{app}\installer"; Flags: ignoreversion; Check: IsArm64
+Source: "{#DistDir}\x86\PS3EyeSetup.exe"; DestDir: "{app}\installer"; Flags: ignoreversion; Check: not Is64BitInstallMode
+Source: "{#DistDir}\x86\PS3EyeServer.exe"; DestDir: "{app}\installer"; Flags: ignoreversion; Check: not Is64BitInstallMode
+; 32-bit apps (run emulated on ARM) use the same 32-bit filter everywhere
+Source: "{#DistDir}\x86\PS3EyeDShow32.dll"; DestDir: "{app}\installer"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; DestName: "README.txt"; Flags: ignoreversion
 
 [Icons]

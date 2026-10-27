@@ -1,5 +1,6 @@
 build/
-build32/
+buildx86/
+buildarm64/
 dist/
 vcpkg/
 vcpkg_installed/

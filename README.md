@@ -16,6 +16,10 @@ Afterwards, **PS3 Eye Camera Settings** in the Start menu lets you test the came
 
 No admin rights to install things? The portable zip works too: unzip, run `PS3EyeSetup.exe`, press `1`.
 
+**Windows on ARM** (Snapdragon laptops, Surface Pro X and so on): the same installer works and installs the native ARM64 version by itself. For the portable version, use the `arm64-portable` zip. The ARM64 version is built from the same code but hasn't been tried on ARM hardware yet, so reports are welcome.
+
+**32-bit Windows 10**: the same installer works here too and installs the 32-bit (x86) version by itself; the portable one is the `x86-portable` zip. It hasn't been tried on 32-bit Windows yet either.
+
 Quick check: open **PS3 Eye Camera Settings** and choose `2` (Test). It grabs 3 seconds of video, shows the fps and saves a snapshot. From a command prompt you can test other modes too, e.g. `PS3EyeSetup test 640 75` or `PS3EyeSetup test 320 187`.
 
 Microphone check: choose `6` (Test the microphone). It records 3 seconds, shows a level bar for each of the 4 mics, and plays the recording back on your speakers (boosted, since the PS3 Eye records quietly). Same from a command prompt: `PS3EyeSetup mictest`.
@@ -61,7 +65,7 @@ Log file: `C:\ProgramData\PS3EyeVCam\vcam.log`
 
 ## Build it yourself
 
-Double-click `build.bat`. It installs the free C++ build tools and Inno Setup if needed, then builds the installer and portable zip into `dist\`. Change the version at the top of `build.bat`.
+Double-click `build.bat`. It installs the free C++ build tools (including the ARM64 compiler) and Inno Setup if needed, then builds x64, ARM64 and x86, the installer (all three in one) and the portable zips (one each) into `dist\`. The loose files for each go in `dist\x64\`, `dist\arm64\` and `dist\x86\`. Change the version at the top of `build.bat`.
 
 The program icon and the installer wizard pictures are made from `icon.png`. After changing it, run `python tools/make_artwork.py` (needs Python with Pillow: `pip install pillow`), then `build.bat`.
 

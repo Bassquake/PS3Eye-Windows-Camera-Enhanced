@@ -58,6 +58,28 @@ const wchar_t* kServerExe = L"PS3EyeServer.exe";
 const wchar_t* kExeName = L"PS3EyeSetup.exe";
 const wchar_t* kAllFiles[] = { kExeName, kDllName, kDShow64, kDShow32, kServerExe };
 
+// The filter this program registers itself. The 32-bit build is for 32-bit Windows 10, which only
+// has 32-bit apps; 64-bit Windows also gets the 32-bit filter, through SysWOW64\regsvr32.
+#ifdef _WIN64
+const wchar_t* kDShowNative = kDShow64;
+const bool kWow32 = true;
+#else
+const wchar_t* kDShowNative = kDShow32;
+const bool kWow32 = false;
+#endif
+
+// The 32-bit build on 64-bit Windows: it would install to Program Files (x86) and 64-bit apps
+// wouldn't see the camera.
+bool WrongBitness()
+{
+#ifdef _WIN64
+	return false;
+#else
+	BOOL wow = FALSE;
+	return IsWow64Process(GetCurrentProcess(), &wow) && wow;
+#endif
+}
+
 HANDLE gConsole = GetStdHandle(STD_OUTPUT_HANDLE);
 
 void Color(WORD c) { SetConsoleTextAttribute(gConsole, c); }
@@ -242,7 +264,7 @@ std::wstring RegisteredDShowPath(bool wow32)
 	std::wstring key = std::wstring(L"Software\\Classes\\CLSID\\") + kDShowClsid + L"\\InprocServer32";
 	wchar_t path[MAX_PATH] = L"";
 	DWORD size = sizeof(path);
-	DWORD flags = RRF_RT_REG_SZ | (wow32 ? RRF_SUBKEY_WOW6432KEY : RRF_SUBKEY_WOW6464KEY);
+	DWORD flags = RRF_RT_REG_SZ | (!kWow32 ? 0 : wow32 ? RRF_SUBKEY_WOW6432KEY : RRF_SUBKEY_WOW6464KEY);
 	if (RegGetValueW(HKEY_LOCAL_MACHINE, key.c_str(), nullptr, flags, nullptr, path, &size) != ERROR_SUCCESS)
 		return L"";
 	return path;
@@ -486,14 +508,14 @@ int MicWatch()
 void UnregisterDShow()
 {
 	StopServer();
-	std::wstring dll64 = RegisteredDShowPath(false), dll32 = RegisteredDShowPath(true);
-	if (dll64.empty())
-		dll64 = InstallDir() + L"\\" + kDShow64;
-	if (dll32.empty())
+	std::wstring dll = RegisteredDShowPath(false), dll32 = kWow32 ? RegisteredDShowPath(true) : L"";
+	if (dll.empty())
+		dll = InstallDir() + L"\\" + kDShowNative;
+	if (kWow32 && dll32.empty())
 		dll32 = InstallDir() + L"\\" + kDShow32;
-	if (FileExists(dll64))
-		CallDllExport(dll64, "DllUnregisterServer");
-	if (FileExists(dll32))
+	if (FileExists(dll))
+		CallDllExport(dll, "DllUnregisterServer");
+	if (kWow32 && FileExists(dll32))
 		Regsvr32(dll32, true);
 	DeleteDShowKeys();
 }
@@ -615,20 +637,23 @@ int Status()
 	{
 		Ok(L"Windows 10 mode: DirectShow camera (Zoom, Teams, Discord, OBS, browsers)");
 
-		std::wstring dll64 = RegisteredDShowPath(false), dll32 = RegisteredDShowPath(true);
-		if (!dll64.empty() && FileExists(dll64))
-			Ok(L"Camera driver registered for 64-bit apps: " + dll64);
+		std::wstring dll = RegisteredDShowPath(false), dll32 = kWow32 ? RegisteredDShowPath(true) : L"";
+		if (!dll.empty() && FileExists(dll))
+			Ok((kWow32 ? L"Camera driver registered for 64-bit apps: " : L"Camera driver registered: ") + dll);
 		else
 		{
 			Bad(L"Camera driver not installed (choose Install)");
 			problems++;
 		}
-		if (!dll32.empty() && FileExists(dll32))
-			Ok(L"Camera driver registered for 32-bit apps");
-		else
+		if (kWow32) // (on 32-bit Windows that one filter is for every app)
 		{
-			Bad(L"Not registered for 32-bit apps (choose Install)");
-			problems++;
+			if (!dll32.empty() && FileExists(dll32))
+				Ok(L"Camera driver registered for 32-bit apps");
+			else
+			{
+				Bad(L"Not registered for 32-bit apps (choose Install)");
+				problems++;
+			}
 		}
 
 		if (DShowCameraVisible())
@@ -739,7 +764,7 @@ int Install()
 	const std::wstring srcDir = ExeDir(), dstDir = InstallDir();
 	std::vector<const wchar_t*> required = { kExeName };
 	if (dshow)
-		required.insert(required.end(), { kDShow64, kDShow32, kServerExe });
+		required.insert(required.end(), { kDShowNative, kDShow32, kServerExe });
 	else
 		required.push_back(kDllName);
 	for (const wchar_t* f : required)
@@ -801,19 +826,22 @@ int Install()
 	if (dshow)
 	{
 		// 3. register the capture filter for 64-bit and 32-bit apps
-		HRESULT hr = CallDllExport(dstDir + L"\\" + kDShow64, "DllRegisterServer");
+		HRESULT hr = CallDllExport(dstDir + L"\\" + kDShowNative, "DllRegisterServer");
 		if (FAILED(hr))
 		{
-			Bad(L"Registering the camera for 64-bit apps failed: " + HrText(hr));
+			Bad((kWow32 ? L"Registering the camera for 64-bit apps failed: " : L"Registering the camera failed: ") + HrText(hr));
 			return 1;
 		}
-		hr = Regsvr32(dstDir + L"\\" + kDShow32, false);
-		if (FAILED(hr))
+		if (kWow32)
 		{
-			Bad(L"Registering the camera for 32-bit apps failed");
-			return 1;
+			hr = Regsvr32(dstDir + L"\\" + kDShow32, false);
+			if (FAILED(hr))
+			{
+				Bad(L"Registering the camera for 32-bit apps failed");
+				return 1;
+			}
 		}
-		Ok(std::wstring(L"\"") + vcam::kCameraName + L"\" added to Windows (64-bit and 32-bit apps)");
+		Ok(std::wstring(L"\"") + vcam::kCameraName + (kWow32 ? L"\" added to Windows (64-bit and 32-bit apps)" : L"\" added to Windows"));
 		vcam::Log(L"Installed (DirectShow) from %s", srcDir.c_str());
 
 		// 4. USB driver
@@ -1412,6 +1440,14 @@ void Usage()
 
 int wmain(int argc, wchar_t** argv)
 {
+	if (WrongBitness())
+	{
+		Bad(L"This is the 32-bit version, for 32-bit Windows 10. This PC runs 64-bit Windows, so use the x64 version (or ARM64 on Windows on ARM).");
+		if (argc < 2)
+			Prompt(L"\nPress Enter to close...");
+		return 1;
+	}
+
 	CoInitializeEx(nullptr, COINIT_MULTITHREADED);
 	MFStartup(MF_VERSION);
 
