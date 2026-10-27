@@ -99,7 +99,8 @@ if(WIN32)
     add_executable(PS3EyeServer WIN32
         src/dshow/Server.cpp
         src/dshow/SharedFrames.cpp
-        src/source/Config.cpp)
+        src/source/Config.cpp
+        src/res/ps3eye.rc)
     target_link_libraries(PS3EyeServer PRIVATE ps3eye_core advapi32 shell32 ole32)
 
     # ---- setup / test / settings tool
@@ -107,7 +108,8 @@ if(WIN32)
         src/setup/setup.cpp
         src/setup/usbdriver.cpp
         src/source/Config.cpp
-        src/setup/setup.manifest)
+        src/setup/setup.manifest
+        src/res/ps3eye.rc)
     target_link_libraries(PS3EyeSetup PRIVATE ps3eye_core ${MF_LIBS} strmiids setupapi newdev cfgmgr32)
     target_link_options(PS3EyeSetup PRIVATE /MANIFESTUAC:NO)   # UAC level comes from setup.manifest
 endif()

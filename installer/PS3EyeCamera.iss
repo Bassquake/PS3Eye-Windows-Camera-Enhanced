@@ -33,6 +33,12 @@ OutputDir={#DistDir}
 OutputBaseFilename=PS3EyeCamera-Setup-{#AppVersion}
 UninstallDisplayName=PS3 Eye Camera
 UninstallDisplayIcon={app}\PS3EyeSetup.exe
+SetupIconFile=..\src\res\ps3eye.ico
+; the camera from icon.png: large = Welcome/Finish pages, small = page headers (with transparency);
+; 100/150/200% sizes, Setup picks the one that fits the screen's scaling
+WizardImageFile=wizard\large-100.bmp,wizard\large-150.bmp,wizard\large-200.bmp
+WizardSmallImageFile=wizard\small-100.bmp,wizard\small-150.bmp,wizard\small-200.bmp
+WizardImageAlphaFormat=defined
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
