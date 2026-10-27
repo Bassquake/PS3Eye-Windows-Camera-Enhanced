@@ -1,8 +1,15 @@
 # PS3 Eye Windows Camera Enhanced
 
-Makes the PlayStation 3 Eye show up on Windows 10 and 11 as a normal webcam called **"PS3 Eye Camera"** in Zoom, Discord, Teams, OBS, browsers and (on Windows 11) the Windows Camera app.
+This is a fork of [ps3eye-windows-camera](https://github.com/aasmh/ps3eye-windows-camera) from aasmh, so credit goes to him for kickstarting this one. Its a no kernel driver, no test-signing, no paid piece of software, and it's a user-mode USB driver (libusb + WinUSB) plugged into Windows 11's built-in virtual camera system, or on Windows 10 into DirectShow, the way OBS Virtual Camera works. 
 
-No kernel driver, no test-signing, no paid software. It's a user-mode USB driver (libusb + WinUSB) plugged into Windows 11's built-in virtual camera system, or on Windows 10 into DirectShow, the way OBS Virtual Camera works.
+## Enhancements
+
+- Makes the PlayStation 3 Eye show up on Windows 10 and 11 as a normal webcam called **"PS3 Eye Camera"** in Zoom, Discord, Teams, OBS, browsers and (on Windows 11) the Windows Camera app.
+- Built for ARM64, x86 and x64.
+- Can adjust the camera properties such as Brightness and Contrast. All available frame rates should be visible to apps.
+- PS3 Microphone can be used too!
+
+![Screenshot of OBS using the PS3 Eye Camera](https://github.com/Bassquake/ps3eye-windows-camera-enhanced/blob/main/captures/obs-properties-cam.png)
 
 ## Install (2 minutes)
 
