@@ -59,6 +59,8 @@ Gain, exposure, white balance and flips are set on the camera's sensor. Brightne
 
 640×480 at up to 75 fps and 320×240 at up to 187 fps (every rate the sensor has: 2–75 and 2–187), in NV12, YUY2 and RGB32 on Windows 11, plus I420 and RGB24 on Windows 10. Apps pick what they want.
 
+**OBS**: its FPS list only has common rates (60, 30, …), so 75 and 187 aren't in it. In the camera source's properties set *Resolution/FPS Type* to **Custom**, pick the resolution, and set *FPS* to **Highest FPS**: that gets 75 at 640x480 and 187 at 320x240. OBS also renders at its own rate (30 or 60 by default), so to record or stream at 75 set *Settings → Video → FPS Type* to **Integer FPS Value** and enter 75.
+
 ## If something's wrong
 
 | Problem | Fix |
